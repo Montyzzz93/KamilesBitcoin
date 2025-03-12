@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Wallet Info</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f4f4f4;
+            margin: 15px;
+        }
+        .container {
+            max-width: 700px;
+            background: white;
+            padding: 15px;
+            margin: auto;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+        }
+        h2 {
+            font-variant: all-petite-caps;
+        }
+        .wallet-address {
+            font-size: 14px;
+            color: #333;
+            word-break: break-word;
+        }
+        .qr-container img {
+            width: 150px;
+            height: 150px;
+        }
+        .balance-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .balance-box {
+            background: #f7931a;
+            color: white;
+            padding: 10px;
+            border-radius: 10px;
+            min-width: 100px;
+        }
+        .gbp-box {
+            background: #1a7bf7;
+            align-content: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: center;
+        }
+        th {
+            background-color: #393939;
+            color: white;
+        }
+        .received {
+            color: green;
+            font-weight: bold;
+        }
+        .sent {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Kamiles Bitcoin Wallet</h2>
+        <!-- QR Code -->
+        <div class="qr-container">
+            <img src="https://quickchart.io/qr?text=bc1qtyy769epcdsesh2n8mmt2z9rwzd359m3swsgc7&size=150" alt="Bitcoin QR Code">
+        </div>   
+		
+        <!-- Bitcoin Address -->
+        <div class="wallet-address">
+            bc1qtyy769epcdsesh2n8mmt2z9rwzd359m3swsgc7
+        </div>
+		
+        <div class="balance-container">
+            <div class="balance-box" id="btc-balance"><span style="font-variant: all-petite-caps;">BTC</span> Loading...</div>
+            <div class="balance-box gbp-box" id="gbp-balance">£ Loading...</div>
+        </div>
+
+        <h2>Transaction History</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date & Time</th>
+                    <th>Amount (BTC)</th>
+                </tr>
+            </thead>
+            <tbody id="transactions">
+                <tr><td colspan="2">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        async function fetchWalletData() {
+            const address = "bc1qtyy769epcdsesh2n8mmt2z9rwzd359m3swsgc7";
+            const balanceUrl = `https://mempool.space/api/address/${address}`;
+            const transactionsUrl = `https://mempool.space/api/address/${address}/txs`;
+            const btcPriceUrl = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp";
+
+            try {
+                // Fetch BTC price in GBP
+                const priceResponse = await fetch(btcPriceUrl);
+                if (!priceResponse.ok) throw new Error("Failed to fetch BTC price");
+                const priceData = await priceResponse.json();
+                const btcToGbp = priceData.bitcoin.gbp;
+
+                // Fetch Balance
+                const balanceResponse = await fetch(balanceUrl);
+                if (!balanceResponse.ok) throw new Error("Failed to fetch balance");
+                const balanceData = await balanceResponse.json();
+
+                // Convert Satoshi to BTC
+                const balanceBTC = (balanceData.chain_stats.funded_txo_sum / 100000000).toFixed(6); // Round to 6 decimals
+                const balanceGBP = (balanceBTC * btcToGbp).toFixed(2); // Round GBP to 2 decimals
+
+                // Update balance display
+                document.getElementById("btc-balance").innerHTML = `<span style="font-variant: all-petite-caps;">BTC</span><br> ${balanceBTC}`;
+                document.getElementById("gbp-balance").innerHTML = `£ ${balanceGBP}`;
+
+                // Fetch Transactions
+                const transactionsResponse = await fetch(transactionsUrl);
+                if (!transactionsResponse.ok) throw new Error("Failed to fetch transactions");
+
+                const transactionsData = await transactionsResponse.json();
+                const transactionsTable = document.getElementById("transactions");
+                transactionsTable.innerHTML = ""; // Clear previous transactions
+
+                transactionsData.slice(0, 10).forEach(tx => {
+                    const txTime = new Date(tx.status.block_time * 1000).toLocaleString(); // Convert UNIX timestamp
+                    let totalReceived = 0;
+                    let totalSent = 0;
+
+                    // Check inputs and outputs
+                    tx.vout.forEach(output => {
+                        if (output.scriptpubkey_address === address) {
+                            totalReceived += output.value; // Incoming BTC
+                        }
+                    });
+
+                    tx.vin.forEach(input => {
+                        if (input.prevout && input.prevout.scriptpubkey_address === address) {
+                            totalSent += input.prevout.value; // Outgoing BTC
+                        }
+                    });
+
+                    let row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td>${txTime}</td>
+                        <td class="${totalReceived > 0 ? 'received' : 'sent'}">
+                            ${totalReceived > 0 ? `+${(totalReceived / 100000000).toFixed(6)} BTC` : `-${(totalSent / 100000000).toFixed(6)} BTC`}
+                        </td>
+                    `;
+                    transactionsTable.appendChild(row);
+                });
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                document.getElementById("btc-balance").innerHTML = "BTC: Error";
+                document.getElementById("gbp-balance").innerHTML = "£: Error";
+                document.getElementById("transactions").innerHTML = `<tr><td colspan="2">Error loading transactions.</td></tr>`;
+            }
+        }
+
+        // Fetch wallet data on page load
+        fetchWalletData();
+    </script>
+
+</body>
+</html>
