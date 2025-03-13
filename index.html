@@ -107,6 +107,10 @@
     </div>
 
     <script>
+        if (location.protocol !== 'https:') {
+	    location.replace(`https://${location.hostname}${location.pathname}${location.search}`);
+	}
+	    
         async function fetchWalletData() {
             const address = "bc1qtyy769epcdsesh2n8mmt2z9rwzd359m3swsgc7";
             const balanceUrl = `https://mempool.space/api/address/${address}`;
