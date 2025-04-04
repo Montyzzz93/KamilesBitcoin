@@ -79,12 +79,12 @@
         <h2>Kamiles Bitcoin Wallet</h2>
         <!-- QR Code -->
         <div class="qr-container">
-            <img src="https://quickchart.io/qr?text=bc1qtyy769epcdsesh2n8mmt2z9rwzd359m3swsgc7&size=150" alt="Bitcoin QR Code">
+            <img src="kamilesQR.png" height="150" width="150" alt="Bitcoin QR Code">
         </div>   
 		
         <!-- Bitcoin Address -->
         <div class="wallet-address">
-            bc1qtyy769epcdsesh2n8mmt2z9rwzd359m3swsgc7
+            bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh
         </div>
 		
         <div class="balance-container">
@@ -112,7 +112,7 @@
 	}
 	    
         async function fetchWalletData() {
-            const address = "bc1qtyy769epcdsesh2n8mmt2z9rwzd359m3swsgc7";
+            const address = "bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh";
             const balanceUrl = `https://mempool.space/api/address/${address}`;
             const transactionsUrl = `https://mempool.space/api/address/${address}/txs`;
             const btcPriceUrl = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp";
