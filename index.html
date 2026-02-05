@@ -15,49 +15,77 @@
       margin:0; padding:15px; display:flex; justify-content:center;
     }
     .container{
-      width:100%; max-width:440px; background:var(--card-bg); padding:24px;
+      width:100%; max-width:440px; background:var(--card-bg); padding:24px; padding-top:30px;
       border-radius:24px; box-shadow:0 4px 20px rgba(0,0,0,0.03);
       position: relative;
     }
 
-    /* Currency selector (top-right) - rounded like your "pill" */
-    .currency-wrap{
+    /* ===== Custom currency dropdown ===== */
+    .ccy{
       position:absolute;
       top:14px;
-      right:14px;
-      z-index: 5;
+      left:14px;
+      z-index:10;
     }
-    .currency-select{
-      appearance:none;
-      -webkit-appearance:none;
-      -moz-appearance:none;
-
+    .ccy-btn{
       border:1px solid var(--border);
       background:#f0f2f5;
       color:var(--text-main);
       border-radius:999px;
-      padding:8px 28px 8px 12px;
+      padding:8px 12px;
       font-family:'Inter',sans-serif;
       font-size:11px;
-      font-weight:700;
+      font-weight:800;
       cursor:pointer;
       line-height:1;
+      display:flex;
+      align-items:center;
+      gap:8px;
       box-shadow:0 4px 12px rgba(0,0,0,0.04);
+      user-select:none;
     }
-    .currency-select:focus{
+    .ccy-btn:focus{
       outline:none;
       box-shadow:0 0 0 3px rgba(26,123,247,0.18);
     }
-    .currency-wrap::after{
-      content:"▾";
-      position:absolute;
-      right:12px;
-      top:50%;
-      transform:translateY(-50%);
+    .ccy-caret{
       font-size:11px;
       color:var(--text-sub);
-      pointer-events:none;
+      transform: translateY(-1px);
     }
+    .ccy-menu{
+      margin-top:8px;
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:14px;
+      overflow:hidden;
+      box-shadow:0 10px 24px rgba(0,0,0,0.08);
+      min-width:86px;
+      display:none;
+    }
+    .ccy.open .ccy-menu{ display:block; }
+
+    .ccy-item{
+      padding:10px 12px;
+      font-size:11px;
+      font-weight:800;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .ccy-item:hover{
+      background:#f5f7fb;
+    }
+    .ccy-item.active{
+      background: rgba(26,123,247,0.10);
+    }
+    .ccy-check{
+      font-size:11px;
+      color: var(--gbp-blue);
+      opacity:0;
+    }
+    .ccy-item.active .ccy-check{ opacity:1; }
 
     h2{ font-size:1.1rem; font-weight:700; margin:0 0 15px 0; text-align:center; }
     .header-section{ text-align:center; margin-bottom:20px; }
@@ -102,13 +130,7 @@
     .tx-btc{ font-size:12px; font-weight:700; display:block; }
     .tx-gbp-then{ font-size:10px; color:var(--text-sub); display:block; margin-top:2px; }
     .tx-gbp-now{ font-size:10px; color:var(--text-sub); display:block; margin-top:2px; }
-
-    .tx-pct{
-      font-size:10px;
-      margin-top:2px;
-      display:block;
-      font-weight:700;
-    }
+    .tx-pct{ font-size:10px; margin-top:2px; display:block; font-weight:700; }
 
     .received{ color:var(--profit-green); }
     .sent{ color:var(--loss-red); }
@@ -126,13 +148,17 @@
 
 <div class="container">
 
-  <!-- Rounded currency dropdown (no label) -->
-  <div class="currency-wrap">
-    <select id="ccy" class="currency-select" aria-label="Currency">
-      <option value="gbp">GBP</option>
-      <option value="usd">USD</option>
-      <option value="eur">EUR</option>
-    </select>
+  <!-- Custom dropdown -->
+  <div class="ccy" id="ccyWrap">
+    <button class="ccy-btn" id="ccyBtn" type="button" aria-haspopup="true" aria-expanded="false">
+      <span id="ccyLabel">GBP</span>
+      <span class="ccy-caret">▾</span>
+    </button>
+    <div class="ccy-menu" id="ccyMenu" role="menu" aria-label="Currency">
+      <div class="ccy-item" data-ccy="gbp" role="menuitem">GBP <span class="ccy-check">✓</span></div>
+      <div class="ccy-item" data-ccy="usd" role="menuitem">USD <span class="ccy-check">✓</span></div>
+      <div class="ccy-item" data-ccy="eur" role="menuitem">EUR <span class="ccy-check">✓</span></div>
+    </div>
   </div>
 
   <div class="header-section">
@@ -167,23 +193,15 @@
   const wallet = "bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh";
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  // ---- Currency settings ----
   const DEFAULT_CCY = "gbp";
   const CCY_STORAGE_KEY = "kamile_ccy";
-  const PRICE_CACHE_KEY_PREFIX = "kamile_btc_prices_"; // per currency
+  const PRICE_CACHE_KEY_PREFIX = "kamile_btc_prices_";
 
   function safeLSGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
   function safeLSSet(key, value) { try { localStorage.setItem(key, value); } catch {} }
   function safeLSRemove(key) { try { localStorage.removeItem(key); } catch {} }
 
-  function getSelectedCCY() {
-    const sel = document.getElementById("ccy");
-    return (sel?.value || DEFAULT_CCY).toLowerCase();
-  }
-  function setSelectedCCY(ccy) {
-    const sel = document.getElementById("ccy");
-    if (sel) sel.value = ccy;
-  }
+  let CURRENT_CCY = (safeLSGet(CCY_STORAGE_KEY) || DEFAULT_CCY).toLowerCase();
 
   function fmtMoney(v, ccy) {
     const mapLocale = { gbp: "en-GB", usd: "en-US", eur: "en-IE" };
@@ -284,7 +302,7 @@
     container.innerHTML = `<div id="loading-msg">Connecting to blockchain...</div>`;
     const statusEl = document.getElementById('loading-msg');
 
-    const ccy = getSelectedCCY();
+    const ccy = CURRENT_CCY;
     const cacheKey = PRICE_CACHE_KEY_PREFIX + ccy;
 
     try {
@@ -365,20 +383,6 @@
           totalBTCReceived += btcVal;
         }
 
-        if (i % 2 === 0 || i === txs.length - 1) {
-          document.getElementById('total-invested').innerText = fmtMoney(totalInvested, ccy);
-
-          const avgBuyTmp = totalBTCReceived > 0 ? (totalInvested / totalBTCReceived) : 0;
-          document.getElementById('avg-buy').innerText = avgBuyTmp.toLocaleString(undefined, {
-            style: 'currency', currency: ccy.toUpperCase(), maximumFractionDigits: 0
-          });
-
-          const profitEl = document.getElementById('total-profit');
-          const tempProfit = currentTotalValue - totalInvested;
-          profitEl.innerText = `Syncing... ${tempProfit > 0 ? '+' : ''}${fmtMoney(tempProfit, ccy)}`;
-          profitEl.style.color = tempProfit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
-        }
-
         const dateLabel = dateObj
           ? dateObj.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })
           : "Unconfirmed";
@@ -423,15 +427,55 @@
     }
   }
 
-  // Init currency selector (default GBP; remember last choice)
-  (function initCurrency() {
-    const saved = (safeLSGet(CCY_STORAGE_KEY) || DEFAULT_CCY).toLowerCase();
-    setSelectedCCY(saved);
+  // ---- Custom dropdown behaviour ----
+  (function initCurrencyDropdown(){
+    const wrap = document.getElementById("ccyWrap");
+    const btn  = document.getElementById("ccyBtn");
+    const menu = document.getElementById("ccyMenu");
+    const label = document.getElementById("ccyLabel");
+    const items = Array.from(menu.querySelectorAll(".ccy-item"));
 
-    document.getElementById("ccy").addEventListener("change", () => {
-      const ccy = getSelectedCCY();
+    function setActive(ccy){
+      CURRENT_CCY = ccy;
       safeLSSet(CCY_STORAGE_KEY, ccy);
-      fetchData();
+      label.textContent = ccy.toUpperCase();
+      items.forEach(it => it.classList.toggle("active", it.dataset.ccy === ccy));
+    }
+
+    function close(){
+      wrap.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+    }
+    function toggle(){
+      const open = wrap.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    // init state
+    setActive(CURRENT_CCY);
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+
+    items.forEach(it => {
+      it.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const ccy = it.dataset.ccy;
+        if (ccy && ccy !== CURRENT_CCY) {
+          setActive(ccy);
+          close();
+          fetchData();
+        } else {
+          close();
+        }
+      });
+    });
+
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") close();
     });
   })();
 
