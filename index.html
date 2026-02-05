@@ -142,7 +142,7 @@
                 item.className = 'tx-item';
                 item.innerHTML = `
                     <div>
-                        <span class="tx-date">${new Date(timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}</span>
+                        <span class="tx-date">${new Date(timestamp).toLocaleDateString([], {year:'numeric', month:'short', day:'numeric'})}</span>
                         <span class="tx-basis">Rate: £${Math.round(closestPrice).toLocaleString()}</span>
                     </div>
                     <div class="tx-values">
@@ -172,5 +172,6 @@
 </script>
 </body>
 </html>
+
 
 
