@@ -17,7 +17,48 @@
     .container{
       width:100%; max-width:440px; background:var(--card-bg); padding:24px;
       border-radius:24px; box-shadow:0 4px 20px rgba(0,0,0,0.03);
+      position: relative;
     }
+
+    /* Currency selector (top-right) - rounded like your "pill" */
+    .currency-wrap{
+      position:absolute;
+      top:14px;
+      right:14px;
+      z-index: 5;
+    }
+    .currency-select{
+      appearance:none;
+      -webkit-appearance:none;
+      -moz-appearance:none;
+
+      border:1px solid var(--border);
+      background:#f0f2f5;
+      color:var(--text-main);
+      border-radius:999px;
+      padding:8px 28px 8px 12px;
+      font-family:'Inter',sans-serif;
+      font-size:11px;
+      font-weight:700;
+      cursor:pointer;
+      line-height:1;
+      box-shadow:0 4px 12px rgba(0,0,0,0.04);
+    }
+    .currency-select:focus{
+      outline:none;
+      box-shadow:0 0 0 3px rgba(26,123,247,0.18);
+    }
+    .currency-wrap::after{
+      content:"▾";
+      position:absolute;
+      right:12px;
+      top:50%;
+      transform:translateY(-50%);
+      font-size:11px;
+      color:var(--text-sub);
+      pointer-events:none;
+    }
+
     h2{ font-size:1.1rem; font-weight:700; margin:0 0 15px 0; text-align:center; }
     .header-section{ text-align:center; margin-bottom:20px; }
     .qr-container{
@@ -60,8 +101,19 @@
     .tx-values{ text-align:right; }
     .tx-btc{ font-size:12px; font-weight:700; display:block; }
     .tx-gbp-then{ font-size:10px; color:var(--text-sub); display:block; margin-top:2px; }
+    .tx-gbp-now{ font-size:10px; color:var(--text-sub); display:block; margin-top:2px; }
+
+    .tx-pct{
+      font-size:10px;
+      margin-top:2px;
+      display:block;
+      font-weight:700;
+    }
+
     .received{ color:var(--profit-green); }
     .sent{ color:var(--loss-red); }
+    .pct-pos{ color:var(--profit-green); }
+    .pct-neg{ color:var(--loss-red); }
 
     #loading-msg{ text-align:center; font-size:12px; color:var(--text-sub); margin-top:10px; }
     .cache-footer{
@@ -73,6 +125,16 @@
 <body>
 
 <div class="container">
+
+  <!-- Rounded currency dropdown (no label) -->
+  <div class="currency-wrap">
+    <select id="ccy" class="currency-select" aria-label="Currency">
+      <option value="gbp">GBP</option>
+      <option value="usd">USD</option>
+      <option value="eur">EUR</option>
+    </select>
+  </div>
+
   <div class="header-section">
     <h2>Kamile's Wallet</h2>
     <div class="qr-container">
@@ -105,8 +167,28 @@
   const wallet = "bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh";
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  function fmtGBP(v) {
-    return v.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+  // ---- Currency settings ----
+  const DEFAULT_CCY = "gbp";
+  const CCY_STORAGE_KEY = "kamile_ccy";
+  const PRICE_CACHE_KEY_PREFIX = "kamile_btc_prices_"; // per currency
+
+  function safeLSGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
+  function safeLSSet(key, value) { try { localStorage.setItem(key, value); } catch {} }
+  function safeLSRemove(key) { try { localStorage.removeItem(key); } catch {} }
+
+  function getSelectedCCY() {
+    const sel = document.getElementById("ccy");
+    return (sel?.value || DEFAULT_CCY).toLowerCase();
+  }
+  function setSelectedCCY(ccy) {
+    const sel = document.getElementById("ccy");
+    if (sel) sel.value = ccy;
+  }
+
+  function fmtMoney(v, ccy) {
+    const mapLocale = { gbp: "en-GB", usd: "en-US", eur: "en-IE" };
+    const locale = mapLocale[ccy] || "en-GB";
+    return v.toLocaleString(locale, { style: "currency", currency: ccy.toUpperCase() });
   }
 
   async function mustJson(res) {
@@ -114,26 +196,9 @@
     return res.json();
   }
 
-  function safeLSGet(key) {
-    try { return localStorage.getItem(key); } catch { return null; }
-  }
-  function safeLSSet(key, value) {
-    try { localStorage.setItem(key, value); } catch {}
-  }
-  function safeLSRemove(key) {
-    try { localStorage.removeItem(key); } catch {}
-  }
-
   async function copyAddress() {
     let copied = false;
-
-    // Modern API
-    try {
-      await navigator.clipboard.writeText(wallet);
-      copied = true;
-    } catch {}
-
-    // Fallback
+    try { await navigator.clipboard.writeText(wallet); copied = true; } catch {}
     if (!copied) {
       try {
         const ta = document.createElement("textarea");
@@ -148,10 +213,7 @@
         ta.remove();
       } catch {}
     }
-
-    if (!copied) {
-      alert("Copy failed on this browser. Please copy manually:\n\n" + wallet);
-    }
+    if (!copied) alert("Copy failed on this browser. Please copy manually:\n\n" + wallet);
 
     const hint = document.getElementById('copy-hint');
     hint.innerText = "DONE!";
@@ -159,12 +221,11 @@
   }
 
   function clearPriceCache() {
-    safeLSRemove('kamile_btc_prices');
+    ["gbp","usd","eur"].forEach(ccy => safeLSRemove(PRICE_CACHE_KEY_PREFIX + ccy));
     alert("Price cache cleared. It will refresh on next load.");
     location.reload();
   }
 
-  // Fetch ALL confirmed chain txs via pagination
   async function fetchAllChainTxs(addr, statusEl) {
     const all = [];
     let lastTxid = null;
@@ -182,52 +243,40 @@
       all.push(...page);
       lastTxid = page[page.length - 1].txid;
 
-      // Safety stop
       if (all.length > 5000) break;
-
       await sleep(150);
     }
-
     return all;
   }
 
-  function setProfitUI(currentTotalValue, totalInvestedGBP) {
+  function setProfitUI(currentTotalValue, totalInvested, ccy) {
     const profitEl = document.getElementById('total-profit');
-    const profit = currentTotalValue - totalInvestedGBP;
+    const profit = currentTotalValue - totalInvested;
 
     let profitPct = "0.0";
-    if (totalInvestedGBP > 0) {
-      profitPct = ((profit / totalInvestedGBP) * 100).toFixed(1);
-    }
+    if (totalInvested > 0) profitPct = ((profit / totalInvested) * 100).toFixed(1);
 
-    profitEl.innerText = `${profit > 0 ? '+' : ''}${fmtGBP(profit)} (${profitPct}%)`;
+    profitEl.innerText = `${profit > 0 ? '+' : ''}${fmtMoney(profit, ccy)} (${profitPct}%)`;
     profitEl.style.color = profit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
   }
 
-  async function fetchHistoricalGBP(dateStr, curPrice, statusEl2, i, total) {
+  async function fetchHistoricalFiat(dateStr, curPrice, ccy, statusEl2, i, total) {
     if (statusEl2) {
       const pct = Math.round((i / Math.max(1, total)) * 100);
       statusEl2.innerText = `Fetching price history... ${pct}% (${i}/${total})`;
     }
 
     const histRes = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr}&localization=false`);
-
-    // If rate-limited or failing: fall back to current price
     if (!histRes.ok) {
-      if (histRes.status === 429 && statusEl2) {
-        statusEl2.innerText = "CoinGecko rate limit (429). Using current price for some days...";
-      }
+      if (histRes.status === 429 && statusEl2) statusEl2.innerText = "CoinGecko rate limit (429). Using current price for some days...";
       return curPrice;
     }
 
     let histData = null;
-    try {
-      histData = await histRes.json();
-    } catch {
-      return curPrice;
-    }
+    try { histData = await histRes.json(); } catch { return curPrice; }
 
-    return histData?.market_data?.current_price?.gbp || curPrice;
+    const v = histData?.market_data?.current_price?.[ccy];
+    return (typeof v === "number" && isFinite(v)) ? v : curPrice;
   }
 
   async function fetchData() {
@@ -235,76 +284,61 @@
     container.innerHTML = `<div id="loading-msg">Connecting to blockchain...</div>`;
     const statusEl = document.getElementById('loading-msg');
 
+    const ccy = getSelectedCCY();
+    const cacheKey = PRICE_CACHE_KEY_PREFIX + ccy;
+
     try {
-      // Step 1: fast data (price + balance)
       const [priceRes, balanceRes] = await Promise.all([
-        fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp"),
+        fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${ccy}`),
         fetch(`https://mempool.space/api/address/${wallet}`)
       ]);
 
       const prices = await mustJson(priceRes);
       const balance = await mustJson(balanceRes);
 
-      const curPrice = prices?.bitcoin?.gbp;
+      const curPrice = prices?.bitcoin?.[ccy];
       if (!curPrice) throw new Error("CoinGecko price missing");
 
       const btcAmount = (balance.chain_stats.funded_txo_sum - balance.chain_stats.spent_txo_sum) / 100000000;
       const currentTotalValue = btcAmount * curPrice;
 
       document.getElementById('curr-btc').innerText = `${btcAmount.toFixed(6)} BTC`;
-      document.getElementById('curr-gbp').innerText = fmtGBP(currentTotalValue);
+      document.getElementById('curr-gbp').innerText = fmtMoney(currentTotalValue, ccy);
 
-      // Step 2: fetch all txs (paged)
       const txs = await fetchAllChainTxs(wallet, statusEl);
-
-      // Mempool returns newest-first; if that ever changes, enforce sort:
       txs.sort((a,b) => (b?.status?.block_time || 0) - (a?.status?.block_time || 0));
 
-      // Step 3: load cache safely
       let priceCache = {};
-      try {
-        priceCache = JSON.parse(safeLSGet('kamile_btc_prices') || "{}") || {};
-      } catch {
-        priceCache = {};
-      }
+      try { priceCache = JSON.parse(safeLSGet(cacheKey) || "{}") || {}; } catch { priceCache = {}; }
 
-      let totalInvestedGBP = 0;
+      let totalInvested = 0;
       let totalBTCReceived = 0;
 
-      // Prepare UI list + status line
       container.innerHTML = `<div id="loading-msg"></div>`;
       const statusEl2 = document.getElementById('loading-msg');
 
-      // Live UI init
-      document.getElementById('total-invested').innerText = fmtGBP(0);
-      document.getElementById('avg-buy').innerText = fmtGBP(0);
-      setProfitUI(currentTotalValue, 0);
+      document.getElementById('total-invested').innerText = fmtMoney(0, ccy);
+      document.getElementById('avg-buy').innerText = fmtMoney(0, ccy);
+      setProfitUI(currentTotalValue, 0, ccy);
 
       for (let i = 0; i < txs.length; i++) {
         const tx = txs[i];
-
-        // Confirmed tx time or null
         const ts = tx?.status?.block_time;
         const dateObj = ts ? new Date(ts * 1000) : null;
 
-        // If unconfirmed: show, but don't try history endpoint (no stable date)
         let historicalPrice = curPrice;
-        let dateStr = null;
-
         if (dateObj) {
           const day = String(dateObj.getDate()).padStart(2, '0');
           const month = String(dateObj.getMonth() + 1).padStart(2, '0');
           const year = dateObj.getFullYear();
-          dateStr = `${day}-${month}-${year}`;
+          const dateStr = `${day}-${month}-${year}`;
 
           if (priceCache[dateStr]) {
             historicalPrice = priceCache[dateStr];
           } else {
-            historicalPrice = await fetchHistoricalGBP(dateStr, curPrice, statusEl2, i + 1, txs.length);
+            historicalPrice = await fetchHistoricalFiat(dateStr, curPrice, ccy, statusEl2, i + 1, txs.length);
             priceCache[dateStr] = historicalPrice;
-            safeLSSet('kamile_btc_prices', JSON.stringify(priceCache));
-
-            // Only sleep when we actually hit CoinGecko history API
+            safeLSSet(cacheKey, JSON.stringify(priceCache));
             if (i < txs.length - 1) await sleep(2100);
           }
         }
@@ -314,30 +348,34 @@
         tx.vin?.forEach(v => { if (v.prevout?.scriptpubkey_address === wallet) snt += v.prevout.value; });
 
         const net = (rcv - snt) / 100000000;
-        if (net === 0) continue; // ignore self transfers
+        if (net === 0) continue;
 
         const isRcv = net > 0;
         const btcVal = Math.abs(net);
-        const gbpThen = btcVal * historicalPrice;
+
+        const thenVal = btcVal * historicalPrice;
+        const nowVal  = btcVal * curPrice;
+
+        const pctMove = historicalPrice > 0 ? ((curPrice - historicalPrice) / historicalPrice) * 100 : 0;
+        const pctClass = pctMove >= 0 ? "pct-pos" : "pct-neg";
+        const pctText = `${pctMove >= 0 ? '+' : ''}${pctMove.toFixed(1)}%`;
 
         if (isRcv) {
-          totalInvestedGBP += gbpThen;
+          totalInvested += thenVal;
           totalBTCReceived += btcVal;
         }
 
-        // Live dashboard update (every 2 txs, and at end)
         if (i % 2 === 0 || i === txs.length - 1) {
-          document.getElementById('total-invested').innerText = fmtGBP(totalInvestedGBP);
+          document.getElementById('total-invested').innerText = fmtMoney(totalInvested, ccy);
 
-          const avgBuyTmp = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
-          document.getElementById('avg-buy').innerText = avgBuyTmp.toLocaleString('en-GB', {
-            style: 'currency', currency: 'GBP', maximumFractionDigits: 0
+          const avgBuyTmp = totalBTCReceived > 0 ? (totalInvested / totalBTCReceived) : 0;
+          document.getElementById('avg-buy').innerText = avgBuyTmp.toLocaleString(undefined, {
+            style: 'currency', currency: ccy.toUpperCase(), maximumFractionDigits: 0
           });
 
-          // Show "Syncing..." while still looping
           const profitEl = document.getElementById('total-profit');
-          const tempProfit = currentTotalValue - totalInvestedGBP;
-          profitEl.innerText = `Syncing... ${tempProfit > 0 ? '+' : ''}${fmtGBP(tempProfit)}`;
+          const tempProfit = currentTotalValue - totalInvested;
+          profitEl.innerText = `Syncing... ${tempProfit > 0 ? '+' : ''}${fmtMoney(tempProfit, ccy)}`;
           profitEl.style.color = tempProfit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
         }
 
@@ -346,8 +384,8 @@
           : "Unconfirmed";
 
         const rateLabel = dateObj
-          ? `Rate: £${Math.round(historicalPrice).toLocaleString()}`
-          : `Rate: £${Math.round(curPrice).toLocaleString()} (current)`;
+          ? `BTC at the time: ${fmtMoney(Math.round(historicalPrice), ccy)}`
+          : `BTC at the time: ${fmtMoney(Math.round(curPrice), ccy)} (current)`;
 
         const item = document.createElement('div');
         item.className = 'tx-item';
@@ -358,7 +396,11 @@
           </div>
           <div class="tx-values">
             <span class="tx-btc ${isRcv ? 'received' : 'sent'}">${isRcv ? '+' : '-'}${btcVal.toFixed(6)}</span>
-            <span class="tx-gbp-then">Worth then £${gbpThen.toFixed(2)}</span>
+            <span class="tx-gbp-then">Worth then ${fmtMoney(thenVal, ccy)}</span>
+            <span class="tx-gbp-now">
+              Worth now ${fmtMoney(nowVal, ccy)}
+              <span class="tx-pct ${pctClass}">${pctText}</span>
+            </span>
           </div>
         `;
         container.appendChild(item);
@@ -366,20 +408,32 @@
 
       if (statusEl2) statusEl2.innerText = "";
 
-      const avgBuy = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
+      const avgBuy = totalBTCReceived > 0 ? (totalInvested / totalBTCReceived) : 0;
 
-      document.getElementById('total-invested').innerText = fmtGBP(totalInvestedGBP);
-      document.getElementById('avg-buy').innerText = avgBuy.toLocaleString('en-GB', {
-        style: 'currency', currency: 'GBP', maximumFractionDigits: 0
+      document.getElementById('total-invested').innerText = fmtMoney(totalInvested, ccy);
+      document.getElementById('avg-buy').innerText = avgBuy.toLocaleString(undefined, {
+        style: 'currency', currency: ccy.toUpperCase(), maximumFractionDigits: 0
       });
 
-      setProfitUI(currentTotalValue, totalInvestedGBP);
+      setProfitUI(currentTotalValue, totalInvested, ccy);
 
     } catch (e) {
       console.error(e);
       container.innerHTML = "CoinGecko / Mempool is busy. Wait 60 seconds and refresh.";
     }
   }
+
+  // Init currency selector (default GBP; remember last choice)
+  (function initCurrency() {
+    const saved = (safeLSGet(CCY_STORAGE_KEY) || DEFAULT_CCY).toLowerCase();
+    setSelectedCCY(saved);
+
+    document.getElementById("ccy").addEventListener("change", () => {
+      const ccy = getSelectedCCY();
+      safeLSSet(CCY_STORAGE_KEY, ccy);
+      fetchData();
+    });
+  })();
 
   fetchData();
 </script>
