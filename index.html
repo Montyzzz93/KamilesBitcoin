@@ -28,6 +28,7 @@
     .address-pill{
       background:#f0f2f5; padding:8px 12px; border-radius:50px; cursor:pointer;
       display:flex; align-items:center; justify-content:center; gap:8px;
+      user-select:none;
     }
     .address-text{
       font-family:monospace; font-size:10px; color:var(--text-sub);
@@ -92,7 +93,7 @@
     <div class="stat-box profit-box"><span class="label">Total Profit / Loss</span><span class="val" id="total-profit">Calculating...</span></div>
   </div>
 
-  <div class="section-title">Recent Activity</div>
+  <div class="section-title">All Activity</div>
   <div id="tx-content">
     <div id="loading-msg">Connecting to blockchain...</div>
   </div>
@@ -113,23 +114,26 @@
     return res.json();
   }
 
-  async function safeSetCache(key, value) {
-    try { localStorage.setItem(key, value); } catch {}
-  }
-  function safeGetCache(key) {
+  function safeLSGet(key) {
     try { return localStorage.getItem(key); } catch { return null; }
   }
-  function safeRemoveCache(key) {
+  function safeLSSet(key, value) {
+    try { localStorage.setItem(key, value); } catch {}
+  }
+  function safeLSRemove(key) {
     try { localStorage.removeItem(key); } catch {}
   }
 
   async function copyAddress() {
     let copied = false;
+
+    // Modern API
     try {
       await navigator.clipboard.writeText(wallet);
       copied = true;
-    } catch (e) {}
+    } catch {}
 
+    // Fallback
     if (!copied) {
       try {
         const ta = document.createElement("textarea");
@@ -142,7 +146,7 @@
         ta.setSelectionRange(0, ta.value.length);
         copied = document.execCommand("copy");
         ta.remove();
-      } catch (e) {}
+      } catch {}
     }
 
     if (!copied) {
@@ -155,12 +159,12 @@
   }
 
   function clearPriceCache() {
-    safeRemoveCache('kamile_btc_prices');
+    safeLSRemove('kamile_btc_prices');
     alert("Price cache cleared. It will refresh on next load.");
     location.reload();
   }
 
-  // --- Mempool pagination: fetch ALL chain transactions ---
+  // Fetch ALL confirmed chain txs via pagination
   async function fetchAllChainTxs(addr, statusEl) {
     const all = [];
     let lastTxid = null;
@@ -170,34 +174,69 @@
         ? `https://mempool.space/api/address/${addr}/txs/chain/${lastTxid}`
         : `https://mempool.space/api/address/${addr}/txs/chain`;
 
-      if (statusEl) statusEl.innerText = lastTxid ? "Loading more transactions..." : "Loading transactions...";
-      const res = await fetch(url);
-      const page = await mustJson(res);
+      if (statusEl) statusEl.innerText = lastTxid ? `Loading more transactions... (${all.length})` : "Loading transactions...";
 
+      const page = await mustJson(await fetch(url));
       if (!Array.isArray(page) || page.length === 0) break;
 
       all.push(...page);
       lastTxid = page[page.length - 1].txid;
 
-      // Safety stop (prevents accidental infinite loops if API changes)
+      // Safety stop
       if (all.length > 5000) break;
 
-      // Small pause to be polite to API
       await sleep(150);
     }
 
     return all;
   }
 
+  function setProfitUI(currentTotalValue, totalInvestedGBP) {
+    const profitEl = document.getElementById('total-profit');
+    const profit = currentTotalValue - totalInvestedGBP;
+
+    let profitPct = "0.0";
+    if (totalInvestedGBP > 0) {
+      profitPct = ((profit / totalInvestedGBP) * 100).toFixed(1);
+    }
+
+    profitEl.innerText = `${profit > 0 ? '+' : ''}${fmtGBP(profit)} (${profitPct}%)`;
+    profitEl.style.color = profit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
+  }
+
+  async function fetchHistoricalGBP(dateStr, curPrice, statusEl2, i, total) {
+    if (statusEl2) {
+      const pct = Math.round((i / Math.max(1, total)) * 100);
+      statusEl2.innerText = `Fetching price history... ${pct}% (${i}/${total})`;
+    }
+
+    const histRes = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr}&localization=false`);
+
+    // If rate-limited or failing: fall back to current price
+    if (!histRes.ok) {
+      if (histRes.status === 429 && statusEl2) {
+        statusEl2.innerText = "CoinGecko rate limit (429). Using current price for some days...";
+      }
+      return curPrice;
+    }
+
+    let histData = null;
+    try {
+      histData = await histRes.json();
+    } catch {
+      return curPrice;
+    }
+
+    return histData?.market_data?.current_price?.gbp || curPrice;
+  }
+
   async function fetchData() {
     const container = document.getElementById('tx-content');
-
-    // Ensure loading-msg exists
     container.innerHTML = `<div id="loading-msg">Connecting to blockchain...</div>`;
     const statusEl = document.getElementById('loading-msg');
 
     try {
-      // Load balance + price first (fast)
+      // Step 1: fast data (price + balance)
       const [priceRes, balanceRes] = await Promise.all([
         fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp"),
         fetch(`https://mempool.space/api/address/${wallet}`)
@@ -215,13 +254,16 @@
       document.getElementById('curr-btc').innerText = `${btcAmount.toFixed(6)} BTC`;
       document.getElementById('curr-gbp').innerText = fmtGBP(currentTotalValue);
 
-      // Fetch ALL transactions with pagination
+      // Step 2: fetch all txs (paged)
       const txs = await fetchAllChainTxs(wallet, statusEl);
 
-      // Cache
+      // Mempool returns newest-first; if that ever changes, enforce sort:
+      txs.sort((a,b) => (b?.status?.block_time || 0) - (a?.status?.block_time || 0));
+
+      // Step 3: load cache safely
       let priceCache = {};
       try {
-        priceCache = JSON.parse(safeGetCache('kamile_btc_prices') || "{}") || {};
+        priceCache = JSON.parse(safeLSGet('kamile_btc_prices') || "{}") || {};
       } catch {
         priceCache = {};
       }
@@ -229,18 +271,23 @@
       let totalInvestedGBP = 0;
       let totalBTCReceived = 0;
 
-      // Clear list but keep a status line at the top
+      // Prepare UI list + status line
       container.innerHTML = `<div id="loading-msg"></div>`;
       const statusEl2 = document.getElementById('loading-msg');
+
+      // Live UI init
+      document.getElementById('total-invested').innerText = fmtGBP(0);
+      document.getElementById('avg-buy').innerText = fmtGBP(0);
+      setProfitUI(currentTotalValue, 0);
 
       for (let i = 0; i < txs.length; i++) {
         const tx = txs[i];
 
-        // Unconfirmed txs (no block_time): show Unconfirmed
+        // Confirmed tx time or null
         const ts = tx?.status?.block_time;
         const dateObj = ts ? new Date(ts * 1000) : null;
 
-        // CoinGecko date format requires a valid date; if unconfirmed -> use current price and skip history fetch
+        // If unconfirmed: show, but don't try history endpoint (no stable date)
         let historicalPrice = curPrice;
         let dateStr = null;
 
@@ -250,57 +297,48 @@
           const year = dateObj.getFullYear();
           dateStr = `${day}-${month}-${year}`;
 
-          historicalPrice = priceCache[dateStr];
-
-          if (!historicalPrice) {
-            if (statusEl2) statusEl2.innerText = `Fetching price (${i + 1}/${txs.length})...`;
-
-            const histRes = await fetch(
-              `https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr}&localization=false`
-            );
-
-            if (histRes.status === 429 && statusEl2) {
-              statusEl2.innerText = "CoinGecko rate limit (429). Using current price for some days...";
-            }
-
-            let histData = null;
-            if (histRes.ok) {
-              histData = await histRes.json();
-            }
-
-            historicalPrice = histData?.market_data?.current_price?.gbp || curPrice;
-
+          if (priceCache[dateStr]) {
+            historicalPrice = priceCache[dateStr];
+          } else {
+            historicalPrice = await fetchHistoricalGBP(dateStr, curPrice, statusEl2, i + 1, txs.length);
             priceCache[dateStr] = historicalPrice;
-            await safeSetCache('kamile_btc_prices', JSON.stringify(priceCache));
+            safeLSSet('kamile_btc_prices', JSON.stringify(priceCache));
 
-            // Only sleep when we actually call the history API
+            // Only sleep when we actually hit CoinGecko history API
             if (i < txs.length - 1) await sleep(2100);
           }
         }
 
         let rcv = 0, snt = 0;
+        tx.vout?.forEach(o => { if (o.scriptpubkey_address === wallet) rcv += o.value; });
+        tx.vin?.forEach(v => { if (v.prevout?.scriptpubkey_address === wallet) snt += v.prevout.value; });
 
-        tx.vout?.forEach(o => {
-          if (o.scriptpubkey_address === wallet) rcv += o.value;
-        });
+        const net = (rcv - snt) / 100000000;
+        if (net === 0) continue; // ignore self transfers
 
-        tx.vin?.forEach(v => {
-          if (v.prevout?.scriptpubkey_address === wallet) snt += v.prevout.value;
-        });
+        const isRcv = net > 0;
+        const btcVal = Math.abs(net);
+        const gbpThen = btcVal * historicalPrice;
 
-        const netChange = (rcv - snt) / 100000000;
-
-        // Ignore pure self-transfer / consolidation
-        if (netChange === 0) continue;
-
-        const isRcv = netChange > 0;
-        const btcVal = Math.abs(netChange);
-        const gbpValAtTime = btcVal * historicalPrice;
-
-        // Treat "received" as "invested" (per your assumption)
         if (isRcv) {
-          totalInvestedGBP += gbpValAtTime;
+          totalInvestedGBP += gbpThen;
           totalBTCReceived += btcVal;
+        }
+
+        // Live dashboard update (every 2 txs, and at end)
+        if (i % 2 === 0 || i === txs.length - 1) {
+          document.getElementById('total-invested').innerText = fmtGBP(totalInvestedGBP);
+
+          const avgBuyTmp = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
+          document.getElementById('avg-buy').innerText = avgBuyTmp.toLocaleString('en-GB', {
+            style: 'currency', currency: 'GBP', maximumFractionDigits: 0
+          });
+
+          // Show "Syncing..." while still looping
+          const profitEl = document.getElementById('total-profit');
+          const tempProfit = currentTotalValue - totalInvestedGBP;
+          profitEl.innerText = `Syncing... ${tempProfit > 0 ? '+' : ''}${fmtGBP(tempProfit)}`;
+          profitEl.style.color = tempProfit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
         }
 
         const dateLabel = dateObj
@@ -320,7 +358,7 @@
           </div>
           <div class="tx-values">
             <span class="tx-btc ${isRcv ? 'received' : 'sent'}">${isRcv ? '+' : '-'}${btcVal.toFixed(6)}</span>
-            <span class="tx-gbp-then">Worth then £${gbpValAtTime.toFixed(2)}</span>
+            <span class="tx-gbp-then">Worth then £${gbpThen.toFixed(2)}</span>
           </div>
         `;
         container.appendChild(item);
@@ -328,22 +366,17 @@
 
       if (statusEl2) statusEl2.innerText = "";
 
-      const avgBuyPrice = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
-      const profit = currentTotalValue - totalInvestedGBP;
-      const profitPct = totalInvestedGBP > 0 ? ((profit / totalInvestedGBP) * 100).toFixed(1) : "0.0";
+      const avgBuy = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
 
       document.getElementById('total-invested').innerText = fmtGBP(totalInvestedGBP);
-      document.getElementById('avg-buy').innerText = avgBuyPrice.toLocaleString('en-GB', {
+      document.getElementById('avg-buy').innerText = avgBuy.toLocaleString('en-GB', {
         style: 'currency', currency: 'GBP', maximumFractionDigits: 0
       });
 
-      const profitEl = document.getElementById('total-profit');
-      profitEl.innerText = `${profit > 0 ? '+' : ''}${fmtGBP(profit)} (${profitPct}%)`;
-      profitEl.style.color = profit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
+      setProfitUI(currentTotalValue, totalInvestedGBP);
 
     } catch (e) {
       console.error(e);
-      const container = document.getElementById('tx-content');
       container.innerHTML = "CoinGecko / Mempool is busy. Wait 60 seconds and refresh.";
     }
   }
@@ -353,4 +386,3 @@
 
 </body>
 </html>
-
