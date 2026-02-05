@@ -271,7 +271,7 @@
   const PRICE_CACHE_KEY_PREFIX = "kamile_btc_prices_";
 
   // Splash timing: show at least this long, but hide ASAP after data is ready
-  const SPLASH_MIN_MS = 6000; // 3.5s (adjust to 3000–5000 if you want)
+  const SPLASH_MIN_MS = 8000; // 3.5s (adjust to 3000–5000 if you want)
 
   function safeLSGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
   function safeLSSet(key, value) { try { localStorage.setItem(key, value); } catch {} }
@@ -595,3 +595,4 @@
 
 </body>
 </html>
+
