@@ -15,14 +15,12 @@
         
         h2 { font-size: 1.1rem; font-weight: 700; margin: 0 0 15px 0; text-align: center; }
 
-        /* QR & Address */
         .header-section { text-align: center; margin-bottom: 20px; }
         .qr-container { background: #fff; padding: 10px; border-radius: 16px; display: inline-block; border: 1px solid var(--border); margin-bottom: 12px; }
         .qr-container img { width: 120px; height: 120px; display: block; }
         .address-pill { background: #f0f2f5; padding: 8px 12px; border-radius: 50px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .address-text { font-family: monospace; font-size: 10px; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
         
-        /* Dashboard Grid */
         .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px; }
         .stat-box { padding: 12px; border-radius: 16px; color: white; display: flex; flex-direction: column; align-items: center; }
         
@@ -35,7 +33,6 @@
         .label { font-size: 9px; font-weight: 600; text-transform: uppercase; opacity: 0.8; margin-bottom: 4px; }
         .val { font-size: 0.95rem; font-weight: 700; }
 
-        /* Activity */
         .section-title { font-weight: 700; margin-bottom: 12px; font-size: 0.95rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
         .tx-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
         .tx-date { font-size: 11px; font-weight: 600; display: block; }
@@ -45,6 +42,8 @@
         .tx-gbp-then { font-size: 10px; color: var(--text-sub); display: block; margin-top: 2px; }
         .received { color: var(--profit-green); }
         .sent { color: var(--loss-red); }
+
+        #loading-msg { text-align: center; font-size: 12px; color: var(--text-sub); margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -84,8 +83,8 @@
         </div>
     </div>
 
-    <div class="section-title">Recent Activity</div>
-    <div id="tx-content"></div>
+    <div class="section-title">All Activity</div>
+    <div id="tx-content"><div id="loading-msg">Fetching full history...</div></div>
 </div>
 
 <script>
@@ -97,62 +96,69 @@
         setTimeout(() => document.getElementById('copy-hint').innerText = "COPY", 1500);
     }
 
-    async function fetchData() {
-        try {
-            const [priceRes, balanceRes, txRes, historyRes] = await Promise.all([
-                fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp"),
-                fetch(`https://mempool.space/api/address/${wallet}`),
-                fetch(`https://mempool.space/api/address/${wallet}/txs`),
-                fetch("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=gbp&days=365&interval=daily")
-            ]);
+	async function fetchData() {
+		try {
+			const [priceRes, balanceRes, txRes] = await Promise.all([
+				fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp"),
+				fetch(`https://mempool.space/api/address/${wallet}`),
+				// FIX A: Switched to the chain endpoint to see full confirmed history
+				fetch(`https://mempool.space/api/address/${wallet}/txs/chain`)
+			]);
 
-            const prices = await priceRes.json();
-            const balance = await balanceRes.json();
-            const txs = await txRes.json();
-            const historyData = await historyRes.json();
+			const prices = await priceRes.json();
+			const balance = await balanceRes.json();
+			const txs = await txRes.json();
 
-            const curPrice = prices.bitcoin.gbp;
-            const btcAmount = (balance.chain_stats.funded_txo_sum / 100000000).toFixed(6);
-            const currentTotalValue = btcAmount * curPrice;
-            
-            document.getElementById('curr-btc').innerText = `${btcAmount} BTC`;
-            document.getElementById('curr-gbp').innerText = currentTotalValue.toLocaleString('en-GB', {style:'currency', currency:'GBP'});
+			const curPrice = prices.bitcoin.gbp;
+			const btcAmount = (balance.chain_stats.funded_txo_sum - balance.chain_stats.spent_txo_sum) / 100000000;
+			const currentTotalValue = btcAmount * curPrice;
+			
+			document.getElementById('curr-btc').innerText = `${btcAmount.toFixed(6)} BTC`;
+			document.getElementById('curr-gbp').innerText = currentTotalValue.toLocaleString('en-GB', {style:'currency', currency:'GBP'});
 
-            let totalInvestedGBP = 0;
-            let totalBTCReceived = 0;
-            const container = document.getElementById('tx-content');
-            container.innerHTML = "";
+			let totalInvestedGBP = 0;
+			let totalBTCReceived = 0;
+			const container = document.getElementById('tx-content');
+			container.innerHTML = "";
 
-            txs.forEach(tx => {
-                const timestamp = tx.status.block_time * 1000;
-                const closestPrice = historyData.prices.reduce((p, c) => Math.abs(c[0] - timestamp) < Math.abs(p[0] - timestamp) ? c : p)[1];
+			// Process each transaction
+			for (const tx of txs) {
+				const timestamp = tx.status.block_time;
+				const dateStr = new Date(timestamp * 1000).toLocaleDateString('en-GB').split('/').reverse().join('-');
+				
+				// FIX B: Fetch specific historical price for this exact date
+				// This bypasses the 'days=max' block for free users
+				const histRes = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr.split('-').reverse().join('-')}&localization=false`);
+				const histData = await histRes.json();
+				const historicalPrice = histData.market_data.current_price.gbp;
 
-                let rcv = 0, snt = 0;
-                tx.vout.forEach(o => { if(o.scriptpubkey_address === wallet) rcv += o.value; });
-                tx.vin.forEach(i => { if(i.prevout?.scriptpubkey_address === wallet) snt += i.prevout.value; });
+				let rcv = 0, snt = 0;
+				tx.vout.forEach(o => { if(o.scriptpubkey_address === wallet) rcv += o.value; });
+				tx.vin.forEach(i => { if(i.prevout?.scriptpubkey_address === wallet) snt += i.prevout.value; });
 
-                const isRcv = rcv > 0;
-                const btcVal = isRcv ? (rcv/100000000) : (snt/100000000);
-                const gbpValAtTime = btcVal * closestPrice;
-                
-                if(isRcv) {
-                    totalInvestedGBP += gbpValAtTime;
-                    totalBTCReceived += btcVal;
-                }
+				const netChange = (rcv - snt) / 100000000;
+				const isRcv = netChange > 0;
+				const btcVal = Math.abs(netChange);
+				const gbpValAtTime = btcVal * historicalPrice;
+				
+				if(isRcv) {
+					totalInvestedGBP += gbpValAtTime;
+					totalBTCReceived += btcVal;
+				}
 
-                const item = document.createElement('div');
-                item.className = 'tx-item';
-                item.innerHTML = `
-                    <div>
-                        <span class="tx-date">${new Date(timestamp).toLocaleString([], {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
-                        <span class="tx-basis">Rate: £${Math.round(closestPrice).toLocaleString()}</span>
-                    </div>
-                    <div class="tx-values">
-                        <span class="tx-btc ${isRcv?'received':'sent'}">${isRcv?'+':'-'}${btcVal.toFixed(6)}</span>
-                        <span class="tx-gbp-then">Worth then £${gbpValAtTime.toFixed(2)}</span>
-                    </div>`;
-                container.appendChild(item);
-            });
+				const item = document.createElement('div');
+				item.className = 'tx-item';
+				item.innerHTML = `
+					<div>
+						<span class="tx-date">${new Date(timestamp * 1000).toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'})}</span>
+						<span class="tx-basis">Rate: £${Math.round(historicalPrice).toLocaleString()}</span>
+					</div>
+					<div class="tx-values">
+						<span class="tx-btc ${isRcv?'received':'sent'}">${isRcv?'+':'-'}${btcVal.toFixed(6)}</span>
+						<span class="tx-gbp-then">Worth then £${gbpValAtTime.toFixed(2)}</span>
+					</div>`;
+				container.appendChild(item);
+			}
 
             const avgBuyPrice = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
             const profit = currentTotalValue - totalInvestedGBP;
@@ -166,10 +172,10 @@
             profitEl.style.color = profit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
 
         } catch (e) {
-            document.getElementById('tx-content').innerHTML = "Error loading data.";
-        }
-    }
-
+			console.error(e);
+			document.getElementById('tx-content').innerHTML = "Error loading full history. CoinGecko limits may be active.";
+		}
+	}
     fetchData();
 </script>
 </body>
