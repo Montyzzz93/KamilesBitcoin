@@ -22,14 +22,14 @@
         .address-pill { background: #f0f2f5; padding: 8px 12px; border-radius: 50px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .address-text { font-family: monospace; font-size: 10px; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
         
-        /* Dashboard Grid (2 columns, 3 rows) */
+        /* Dashboard Grid */
         .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px; }
         .stat-box { padding: 12px; border-radius: 16px; color: white; display: flex; flex-direction: column; align-items: center; }
         
         .btc-box { background: var(--btc-orange); }
         .gbp-box { background: var(--gbp-blue); }
         .invested-box { background: #474d57; }
-        .avg-box { background: #6c5ce7; } /* Purple for Average */
+        .avg-box { background: #6c5ce7; }
         .profit-box { background: #f1f3f5; color: var(--text-main); grid-column: span 2; text-align: center; }
 
         .label { font-size: 9px; font-weight: 600; text-transform: uppercase; opacity: 0.8; margin-bottom: 4px; }
@@ -38,10 +38,11 @@
         /* Activity */
         .section-title { font-weight: 700; margin-bottom: 12px; font-size: 0.95rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
         .tx-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
-        .tx-date { font-size: 12px; font-weight: 600; }
+        .tx-date { font-size: 11px; font-weight: 600; display: block; }
         .tx-basis { font-size: 10px; color: var(--text-sub); display: block; }
         .tx-values { text-align: right; }
-        .tx-btc { font-size: 12px; font-weight: 700; }
+        .tx-btc { font-size: 12px; font-weight: 700; display: block; }
+        .tx-gbp-then { font-size: 10px; color: var(--text-sub); display: block; margin-top: 2px; }
         .received { color: var(--profit-green); }
         .sent { color: var(--loss-red); }
     </style>
@@ -132,9 +133,10 @@
 
                 const isRcv = rcv > 0;
                 const btcVal = isRcv ? (rcv/100000000) : (snt/100000000);
+                const gbpValAtTime = btcVal * closestPrice;
                 
                 if(isRcv) {
-                    totalInvestedGBP += (btcVal * closestPrice);
+                    totalInvestedGBP += gbpValAtTime;
                     totalBTCReceived += btcVal;
                 }
 
@@ -142,16 +144,16 @@
                 item.className = 'tx-item';
                 item.innerHTML = `
                     <div>
-                        <span class="tx-date">${new Date(timestamp).toLocaleDateString([], {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
+                        <span class="tx-date">${new Date(timestamp).toLocaleString([], {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
                         <span class="tx-basis">Rate: £${Math.round(closestPrice).toLocaleString()}</span>
                     </div>
                     <div class="tx-values">
                         <span class="tx-btc ${isRcv?'received':'sent'}">${isRcv?'+':'-'}${btcVal.toFixed(6)}</span>
+                        <span class="tx-gbp-then">Worth then £${gbpValAtTime.toFixed(2)}</span>
                     </div>`;
                 container.appendChild(item);
             });
 
-            // Update Investment Cards
             const avgBuyPrice = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
             const profit = currentTotalValue - totalInvestedGBP;
             const profitPct = totalInvestedGBP > 0 ? ((profit / totalInvestedGBP) * 100).toFixed(1) : 0;
@@ -172,7 +174,3 @@
 </script>
 </body>
 </html>
-
-
-
-
