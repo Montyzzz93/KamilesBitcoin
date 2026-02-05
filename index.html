@@ -3,187 +3,172 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bitcoin Wallet Info</title>
+    <title>Kamile's BTC Portfolio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            background-color: #f4f4f4;
-            margin: 15px;
+        :root {
+            --btc-orange: #f7931a; --gbp-blue: #1a7bf7; --profit-green: #21a453; --loss-red: #cf304a;
+            --bg-color: #f8f9fc; --card-bg: #ffffff; --text-main: #1e2329; --text-sub: #707a8a; --border: #eaecf0;
         }
-        .container {
-            max-width: 700px;
-            background: white;
-            padding: 15px;
-            margin: auto;
-            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-            border-radius: 10px;
-        }
-        h2 {
-            font-variant: all-petite-caps;
-        }
-        .wallet-address {
-            font-size: 14px;
-            color: #333;
-            word-break: break-word;
-        }
-        .qr-container img {
-            width: 150px;
-            height: 150px;
-        }
-        .balance-container {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            font-weight: bold;
-            margin: 20px 0;
-        }
-        .balance-box {
-            background: #f7931a;
-            color: white;
-            padding: 10px;
-            border-radius: 10px;
-            min-width: 100px;
-        }
-        .gbp-box {
-            background: #1a7bf7;
-            align-content: center;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 12px;
-            text-align: center;
-        }
-        th {
-            background-color: #393939;
-            color: white;
-        }
-        .received {
-            color: green;
-            font-weight: bold;
-        }
-        .sent {
-            color: red;
-            font-weight: bold;
-        }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-color); color: var(--text-main); margin: 0; padding: 15px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 440px; background: var(--card-bg); padding: 24px; border-radius: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); }
+        
+        h2 { font-size: 1.1rem; font-weight: 700; margin: 0 0 15px 0; text-align: center; }
+
+        /* QR & Address */
+        .header-section { text-align: center; margin-bottom: 20px; }
+        .qr-container { background: #fff; padding: 10px; border-radius: 16px; display: inline-block; border: 1px solid var(--border); margin-bottom: 12px; }
+        .qr-container img { width: 120px; height: 120px; display: block; }
+        .address-pill { background: #f0f2f5; padding: 8px 12px; border-radius: 50px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .address-text { font-family: monospace; font-size: 10px; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+        
+        /* Dashboard Grid (2 columns, 3 rows) */
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px; }
+        .stat-box { padding: 12px; border-radius: 16px; color: white; display: flex; flex-direction: column; }
+        
+        .btc-box { background: var(--btc-orange); }
+        .gbp-box { background: var(--gbp-blue); }
+        .invested-box { background: #474d57; }
+        .avg-box { background: #6c5ce7; } /* Purple for Average */
+        .profit-box { background: #f1f3f5; color: var(--text-main); grid-column: span 2; text-align: center; }
+
+        .label { font-size: 9px; font-weight: 600; text-transform: uppercase; opacity: 0.8; margin-bottom: 4px; }
+        .val { font-size: 0.95rem; font-weight: 700; }
+
+        /* Activity */
+        .section-title { font-weight: 700; margin-bottom: 12px; font-size: 0.95rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        .tx-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .tx-date { font-size: 12px; font-weight: 600; }
+        .tx-basis { font-size: 10px; color: var(--text-sub); display: block; }
+        .tx-values { text-align: right; }
+        .tx-btc { font-size: 12px; font-weight: 700; }
+        .received { color: var(--profit-green); }
+        .sent { color: var(--loss-red); }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h2>Kamiles Bitcoin Wallet</h2>
-        <!-- QR Code -->
+<div class="container">
+    <div class="header-section">
+        <h2>Kamile's Wallet</h2>
         <div class="qr-container">
-            <img src="https://raw.githubusercontent.com/Montyzzz93/KamilesBitcoin/refs/heads/main/kamilesQR.png" height="150" width="150" alt="Bitcoin QR Code">
-        </div>   
-		
-        <!-- Bitcoin Address -->
-        <div class="wallet-address">
-            bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh
+            <img src="https://raw.githubusercontent.com/Montyzzz93/KamilesBitcoin/refs/heads/main/kamilesQR.png" alt="QR">
         </div>
-		
-        <div class="balance-container">
-            <div class="balance-box" id="btc-balance"><span style="font-variant: all-petite-caps;">BTC</span> Loading...</div>
-            <div class="balance-box gbp-box" id="gbp-balance">£ Loading...</div>
+        <div class="address-pill" onclick="copyAddress()">
+            <span class="address-text">bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh</span>
+            <span style="font-size: 9px; font-weight: 700; color: var(--btc-orange);" id="copy-hint">COPY</span>
         </div>
-
-        <h2>Transaction History</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Date & Time</th>
-                    <th>Amount (BTC)</th>
-                </tr>
-            </thead>
-            <tbody id="transactions">
-                <tr><td colspan="2">Loading...</td></tr>
-            </tbody>
-        </table>
     </div>
 
-    <script>
-        if (location.protocol !== 'https:') {
-	    location.replace(`https://${location.hostname}${location.pathname}${location.search}`);
-	}
-	    
-        async function fetchWalletData() {
-            const address = "bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh";
-            const balanceUrl = `https://mempool.space/api/address/${address}`;
-            const transactionsUrl = `https://mempool.space/api/address/${address}/txs`;
-            const btcPriceUrl = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp";
+    <div class="dashboard-grid">
+        <div class="stat-box btc-box">
+            <span class="label">Holdings</span>
+            <span class="val" id="curr-btc">... BTC</span>
+        </div>
+        <div class="stat-box gbp-box">
+            <span class="label">Market Value</span>
+            <span class="val" id="curr-gbp">...</span>
+        </div>
+        <div class="stat-box invested-box">
+            <span class="label">Total Invested</span>
+            <span class="val" id="total-invested">...</span>
+        </div>
+        <div class="stat-box avg-box">
+            <span class="label">Avg Buy Price</span>
+            <span class="val" id="avg-buy">...</span>
+        </div>
+        <div class="stat-box profit-box">
+            <span class="label">Total Profit / Loss</span>
+            <span class="val" id="total-profit">Calculating...</span>
+        </div>
+    </div>
 
-            try {
-                // Fetch BTC price in GBP
-                const priceResponse = await fetch(btcPriceUrl);
-                if (!priceResponse.ok) throw new Error("Failed to fetch BTC price");
-                const priceData = await priceResponse.json();
-                const btcToGbp = priceData.bitcoin.gbp;
+    <div class="section-title">Recent Activity</div>
+    <div id="tx-content"></div>
+</div>
 
-                // Fetch Balance
-                const balanceResponse = await fetch(balanceUrl);
-                if (!balanceResponse.ok) throw new Error("Failed to fetch balance");
-                const balanceData = await balanceResponse.json();
+<script>
+    const wallet = "bc1q2uq0gae44n9ga4navc9zjlg7h937j2mrf2pkgh";
 
-                // Convert Satoshi to BTC
-                const balanceBTC = (balanceData.chain_stats.funded_txo_sum / 100000000).toFixed(6); // Round to 6 decimals
-                const balanceGBP = (balanceBTC * btcToGbp).toFixed(2); // Round GBP to 2 decimals
+    function copyAddress() {
+        navigator.clipboard.writeText(wallet);
+        document.getElementById('copy-hint').innerText = "DONE!";
+        setTimeout(() => document.getElementById('copy-hint').innerText = "COPY", 1500);
+    }
 
-                // Update balance display
-                document.getElementById("btc-balance").innerHTML = `<span style="font-variant: all-petite-caps;">BTC</span><br> ${balanceBTC}`;
-                document.getElementById("gbp-balance").innerHTML = `£ ${balanceGBP}`;
+    async function fetchData() {
+        try {
+            const [priceRes, balanceRes, txRes, historyRes] = await Promise.all([
+                fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp"),
+                fetch(`https://mempool.space/api/address/${wallet}`),
+                fetch(`https://mempool.space/api/address/${wallet}/txs`),
+                fetch("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=gbp&days=365&interval=daily")
+            ]);
 
-                // Fetch Transactions
-                const transactionsResponse = await fetch(transactionsUrl);
-                if (!transactionsResponse.ok) throw new Error("Failed to fetch transactions");
+            const prices = await priceRes.json();
+            const balance = await balanceRes.json();
+            const txs = await txRes.json();
+            const historyData = await historyRes.json();
 
-                const transactionsData = await transactionsResponse.json();
-                const transactionsTable = document.getElementById("transactions");
-                transactionsTable.innerHTML = ""; // Clear previous transactions
+            const curPrice = prices.bitcoin.gbp;
+            const btcAmount = (balance.chain_stats.funded_txo_sum / 100000000).toFixed(6);
+            const currentTotalValue = btcAmount * curPrice;
+            
+            document.getElementById('curr-btc').innerText = `${btcAmount} BTC`;
+            document.getElementById('curr-gbp').innerText = currentTotalValue.toLocaleString('en-GB', {style:'currency', currency:'GBP'});
 
-                transactionsData.slice(0, 10).forEach(tx => {
-                    const txTime = new Date(tx.status.block_time * 1000).toLocaleString(); // Convert UNIX timestamp
-                    let totalReceived = 0;
-                    let totalSent = 0;
+            let totalInvestedGBP = 0;
+            let totalBTCReceived = 0;
+            const container = document.getElementById('tx-content');
+            container.innerHTML = "";
 
-                    // Check inputs and outputs
-                    tx.vout.forEach(output => {
-                        if (output.scriptpubkey_address === address) {
-                            totalReceived += output.value; // Incoming BTC
-                        }
-                    });
+            txs.forEach(tx => {
+                const timestamp = tx.status.block_time * 1000;
+                const closestPrice = historyData.prices.reduce((p, c) => Math.abs(c[0] - timestamp) < Math.abs(p[0] - timestamp) ? c : p)[1];
 
-                    tx.vin.forEach(input => {
-                        if (input.prevout && input.prevout.scriptpubkey_address === address) {
-                            totalSent += input.prevout.value; // Outgoing BTC
-                        }
-                    });
+                let rcv = 0, snt = 0;
+                tx.vout.forEach(o => { if(o.scriptpubkey_address === wallet) rcv += o.value; });
+                tx.vin.forEach(i => { if(i.prevout?.scriptpubkey_address === wallet) snt += i.prevout.value; });
 
-                    let row = document.createElement("tr");
-                    row.innerHTML = `
-                        <td>${txTime}</td>
-                        <td class="${totalReceived > 0 ? 'received' : 'sent'}">
-                            ${totalReceived > 0 ? `+${(totalReceived / 100000000).toFixed(6)} BTC` : `-${(totalSent / 100000000).toFixed(6)} BTC`}
-                        </td>
-                    `;
-                    transactionsTable.appendChild(row);
-                });
+                const isRcv = rcv > 0;
+                const btcVal = isRcv ? (rcv/100000000) : (snt/100000000);
+                
+                if(isRcv) {
+                    totalInvestedGBP += (btcVal * closestPrice);
+                    totalBTCReceived += btcVal;
+                }
 
-            } catch (error) {
-                console.error("Error fetching data:", error);
-                document.getElementById("btc-balance").innerHTML = "BTC: Error";
-                document.getElementById("gbp-balance").innerHTML = "£: Error";
-                document.getElementById("transactions").innerHTML = `<tr><td colspan="2">Error loading transactions.</td></tr>`;
-            }
+                const item = document.createElement('div');
+                item.className = 'tx-item';
+                item.innerHTML = `
+                    <div>
+                        <span class="tx-date">${new Date(timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}</span>
+                        <span class="tx-basis">Rate: £${Math.round(closestPrice).toLocaleString()}</span>
+                    </div>
+                    <div class="tx-values">
+                        <span class="tx-btc ${isRcv?'received':'sent'}">${isRcv?'+':'-'}${btcVal.toFixed(6)}</span>
+                    </div>`;
+                container.appendChild(item);
+            });
+
+            // Update Investment Cards
+            const avgBuyPrice = totalBTCReceived > 0 ? (totalInvestedGBP / totalBTCReceived) : 0;
+            const profit = currentTotalValue - totalInvestedGBP;
+            const profitPct = totalInvestedGBP > 0 ? ((profit / totalInvestedGBP) * 100).toFixed(1) : 0;
+
+            document.getElementById('total-invested').innerText = totalInvestedGBP.toLocaleString('en-GB', {style:'currency', currency:'GBP'});
+            document.getElementById('avg-buy').innerText = avgBuyPrice.toLocaleString('en-GB', {style:'currency', currency:'GBP', maximumFractionDigits: 0});
+            
+            const profitEl = document.getElementById('total-profit');
+            profitEl.innerText = `${profit > 0 ? '+' : ''}${profit.toLocaleString('en-GB', {style:'currency', currency:'GBP'})} (${profitPct}%)`;
+            profitEl.style.color = profit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
+
+        } catch (e) {
+            document.getElementById('tx-content').innerHTML = "Error loading data.";
         }
+    }
 
-        // Fetch wallet data on page load.
-        fetchWalletData();
-    </script>
-
+    fetchData();
+</script>
 </body>
 </html>
