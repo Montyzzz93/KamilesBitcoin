@@ -113,17 +113,40 @@
     return res.json();
   }
 
+  async function safeSetCache(key, value) {
+    try { localStorage.setItem(key, value); } catch {}
+  }
+  function safeGetCache(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  }
+  function safeRemoveCache(key) {
+    try { localStorage.removeItem(key); } catch {}
+  }
+
   async function copyAddress() {
+    let copied = false;
     try {
-      // Can fail on file:// pages; fallback below covers that
       await navigator.clipboard.writeText(wallet);
-    } catch (e) {
-      const ta = document.createElement("textarea");
-      ta.value = wallet;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
+      copied = true;
+    } catch (e) {}
+
+    if (!copied) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = wallet;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        copied = document.execCommand("copy");
+        ta.remove();
+      } catch (e) {}
+    }
+
+    if (!copied) {
+      alert("Copy failed on this browser. Please copy manually:\n\n" + wallet);
     }
 
     const hint = document.getElementById('copy-hint');
@@ -132,28 +155,56 @@
   }
 
   function clearPriceCache() {
-    localStorage.removeItem('kamile_btc_prices');
+    safeRemoveCache('kamile_btc_prices');
     alert("Price cache cleared. It will refresh on next load.");
     location.reload();
+  }
+
+  // --- Mempool pagination: fetch ALL chain transactions ---
+  async function fetchAllChainTxs(addr, statusEl) {
+    const all = [];
+    let lastTxid = null;
+
+    for (;;) {
+      const url = lastTxid
+        ? `https://mempool.space/api/address/${addr}/txs/chain/${lastTxid}`
+        : `https://mempool.space/api/address/${addr}/txs/chain`;
+
+      if (statusEl) statusEl.innerText = lastTxid ? "Loading more transactions..." : "Loading transactions...";
+      const res = await fetch(url);
+      const page = await mustJson(res);
+
+      if (!Array.isArray(page) || page.length === 0) break;
+
+      all.push(...page);
+      lastTxid = page[page.length - 1].txid;
+
+      // Safety stop (prevents accidental infinite loops if API changes)
+      if (all.length > 5000) break;
+
+      // Small pause to be polite to API
+      await sleep(150);
+    }
+
+    return all;
   }
 
   async function fetchData() {
     const container = document.getElementById('tx-content');
 
-    // Always ensure loading-msg exists (your original bug was deleting it and then updating it)
+    // Ensure loading-msg exists
     container.innerHTML = `<div id="loading-msg">Connecting to blockchain...</div>`;
     const statusEl = document.getElementById('loading-msg');
 
     try {
-      const [priceRes, balanceRes, txRes] = await Promise.all([
+      // Load balance + price first (fast)
+      const [priceRes, balanceRes] = await Promise.all([
         fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp"),
-        fetch(`https://mempool.space/api/address/${wallet}`),
-        fetch(`https://mempool.space/api/address/${wallet}/txs/chain`)
+        fetch(`https://mempool.space/api/address/${wallet}`)
       ]);
 
       const prices = await mustJson(priceRes);
       const balance = await mustJson(balanceRes);
-      const txs = await mustJson(txRes);
 
       const curPrice = prices?.bitcoin?.gbp;
       if (!curPrice) throw new Error("CoinGecko price missing");
@@ -164,8 +215,16 @@
       document.getElementById('curr-btc').innerText = `${btcAmount.toFixed(6)} BTC`;
       document.getElementById('curr-gbp').innerText = fmtGBP(currentTotalValue);
 
+      // Fetch ALL transactions with pagination
+      const txs = await fetchAllChainTxs(wallet, statusEl);
+
       // Cache
-      let priceCache = JSON.parse(localStorage.getItem('kamile_btc_prices') || "{}");
+      let priceCache = {};
+      try {
+        priceCache = JSON.parse(safeGetCache('kamile_btc_prices') || "{}") || {};
+      } catch {
+        priceCache = {};
+      }
 
       let totalInvestedGBP = 0;
       let totalBTCReceived = 0;
@@ -177,38 +236,46 @@
       for (let i = 0; i < txs.length; i++) {
         const tx = txs[i];
 
-        // Some tx entries may not have block_time yet; fallback to "now"
+        // Unconfirmed txs (no block_time): show Unconfirmed
         const ts = tx?.status?.block_time;
-        const dateObj = ts ? new Date(ts * 1000) : new Date();
+        const dateObj = ts ? new Date(ts * 1000) : null;
 
-        // CoinGecko date format: DD-MM-YYYY
-        const day = String(dateObj.getDate()).padStart(2, '0');
-        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const year = dateObj.getFullYear();
-        const dateStr = `${day}-${month}-${year}`;
+        // CoinGecko date format requires a valid date; if unconfirmed -> use current price and skip history fetch
+        let historicalPrice = curPrice;
+        let dateStr = null;
 
-        let historicalPrice = priceCache[dateStr];
+        if (dateObj) {
+          const day = String(dateObj.getDate()).padStart(2, '0');
+          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+          const year = dateObj.getFullYear();
+          dateStr = `${day}-${month}-${year}`;
 
-        if (!historicalPrice) {
-          if (statusEl2) statusEl2.innerText = `Fetching price for TX (${i + 1}/${txs.length})...`;
+          historicalPrice = priceCache[dateStr];
 
-          const histRes = await fetch(
-            `https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr}&localization=false`
-          );
+          if (!historicalPrice) {
+            if (statusEl2) statusEl2.innerText = `Fetching price (${i + 1}/${txs.length})...`;
 
-          // If CoinGecko rate-limits, don't hard fail: fallback to current price
-          let histData = null;
-          if (histRes.ok) {
-            histData = await histRes.json();
+            const histRes = await fetch(
+              `https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr}&localization=false`
+            );
+
+            if (histRes.status === 429 && statusEl2) {
+              statusEl2.innerText = "CoinGecko rate limit (429). Using current price for some days...";
+            }
+
+            let histData = null;
+            if (histRes.ok) {
+              histData = await histRes.json();
+            }
+
+            historicalPrice = histData?.market_data?.current_price?.gbp || curPrice;
+
+            priceCache[dateStr] = historicalPrice;
+            await safeSetCache('kamile_btc_prices', JSON.stringify(priceCache));
+
+            // Only sleep when we actually call the history API
+            if (i < txs.length - 1) await sleep(2100);
           }
-
-          historicalPrice = histData?.market_data?.current_price?.gbp || curPrice;
-
-          priceCache[dateStr] = historicalPrice;
-          localStorage.setItem('kamile_btc_prices', JSON.stringify(priceCache));
-
-          // Only sleep when we actually call the history API
-          if (i < txs.length - 1) await sleep(2100);
         }
 
         let rcv = 0, snt = 0;
@@ -230,18 +297,26 @@
         const btcVal = Math.abs(netChange);
         const gbpValAtTime = btcVal * historicalPrice;
 
-        // Your original logic: treat "received" as "invested"
+        // Treat "received" as "invested" (per your assumption)
         if (isRcv) {
           totalInvestedGBP += gbpValAtTime;
           totalBTCReceived += btcVal;
         }
 
+        const dateLabel = dateObj
+          ? dateObj.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })
+          : "Unconfirmed";
+
+        const rateLabel = dateObj
+          ? `Rate: £${Math.round(historicalPrice).toLocaleString()}`
+          : `Rate: £${Math.round(curPrice).toLocaleString()} (current)`;
+
         const item = document.createElement('div');
         item.className = 'tx-item';
         item.innerHTML = `
           <div>
-            <span class="tx-date">${dateObj.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
-            <span class="tx-basis">Rate: £${Math.round(historicalPrice).toLocaleString()}</span>
+            <span class="tx-date">${dateLabel}</span>
+            <span class="tx-basis">${rateLabel}</span>
           </div>
           <div class="tx-values">
             <span class="tx-btc ${isRcv ? 'received' : 'sent'}">${isRcv ? '+' : '-'}${btcVal.toFixed(6)}</span>
@@ -268,7 +343,8 @@
 
     } catch (e) {
       console.error(e);
-      container.innerHTML = "CoinGecko is busy. Wait 60 seconds and refresh.";
+      const container = document.getElementById('tx-content');
+      container.innerHTML = "CoinGecko / Mempool is busy. Wait 60 seconds and refresh.";
     }
   }
 
