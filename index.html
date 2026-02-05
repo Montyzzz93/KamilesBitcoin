@@ -20,6 +20,72 @@
       position: relative;
     }
 
+    /* ===== Splash screen overlay ===== */
+    .splash{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:rgba(248,249,252,0.92);
+      backdrop-filter: blur(6px);
+      z-index:9999;
+      transition: opacity 260ms ease, transform 260ms ease;
+    }
+    .splash.hidden{
+      opacity:0;
+      transform: scale(1.02);
+      pointer-events:none;
+    }
+    .splash-card{
+      width:min(340px, 92vw);
+	  align-content: center;
+	  height: 100%;
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius:22px;
+      box-shadow:0 10px 28px rgba(0,0,0,0.10);
+      padding:22px 18px;
+      text-align:center;
+    }
+    .btc-spinner{
+      width:84px;
+      height:84px;
+      border-radius:50%;
+      display:grid;
+      place-items:center;
+      margin: 2px auto 12px auto;
+      background: radial-gradient(circle at 30% 30%, #ffd39a, #f7931a);
+      box-shadow: 0 10px 22px rgba(247,147,26,0.25);
+      animation: spin 1.1s linear infinite;
+    }
+    .btc-logo{
+      width:54px;
+      height:54px;
+      border-radius:50%;
+      background:#fff;
+      display:grid;
+      place-items:center;
+      font-weight:900;
+      font-size:30px;
+      color:#f7931a;
+      box-shadow: inset 0 0 0 2px rgba(247,147,26,0.18);
+      /* counter-rotate so the ₿ stays upright while the outer spins */
+      animation: counterSpin 1.1s linear infinite;
+    }
+    .splash-title{
+      font-size:14px;
+      font-weight:800;
+      margin: 0 0 6px 0;
+    }
+    .splash-sub{
+      font-size:11px;
+      color: var(--text-sub);
+      margin:0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes counterSpin { to { transform: rotate(-360deg); } }
+
     /* ===== Custom currency dropdown ===== */
     .ccy{
       position:absolute;
@@ -74,12 +140,8 @@
       align-items:center;
       justify-content:space-between;
     }
-    .ccy-item:hover{
-      background:#f5f7fb;
-    }
-    .ccy-item.active{
-      background: rgba(26,123,247,0.10);
-    }
+    .ccy-item:hover{ background:#f5f7fb; }
+    .ccy-item.active{ background: rgba(26,123,247,0.10); }
     .ccy-check{
       font-size:11px;
       color: var(--gbp-blue);
@@ -146,6 +208,17 @@
 </head>
 <body>
 
+<!-- Splash overlay -->
+<div class="splash" id="splash">
+  <div class="splash-card">
+    <div class="btc-spinner" aria-hidden="true">
+      <div class="btc-logo">₿</div>
+    </div>
+    <p class="splash-title">Loading wallet…</p>
+    <p class="splash-sub" id="splashSub">Syncing transactions and price history</p>
+  </div>
+</div>
+
 <div class="container">
 
   <!-- Custom dropdown -->
@@ -197,6 +270,9 @@
   const CCY_STORAGE_KEY = "kamile_ccy";
   const PRICE_CACHE_KEY_PREFIX = "kamile_btc_prices_";
 
+  // Splash timing: show at least this long, but hide ASAP after data is ready
+  const SPLASH_MIN_MS = 3500; // 3.5s (adjust to 3000–5000 if you want)
+
   function safeLSGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
   function safeLSSet(key, value) { try { localStorage.setItem(key, value); } catch {} }
   function safeLSRemove(key) { try { localStorage.removeItem(key); } catch {} }
@@ -212,6 +288,24 @@
   async function mustJson(res) {
     if (!res.ok) throw new Error(`HTTP ${res.status} from ${res.url}`);
     return res.json();
+  }
+
+  function splashSetText(txt){
+    const el = document.getElementById("splashSub");
+    if (el) el.textContent = txt;
+  }
+
+  async function hideSplashWhenReady(startTs){
+    const elapsed = Date.now() - startTs;
+    const remain = Math.max(0, SPLASH_MIN_MS - elapsed);
+    if (remain) await sleep(remain);
+
+    const splash = document.getElementById("splash");
+    if (splash) {
+      splash.classList.add("hidden");
+      // remove from DOM after fade
+      setTimeout(() => splash.remove(), 350);
+    }
   }
 
   async function copyAddress() {
@@ -298,6 +392,9 @@
   }
 
   async function fetchData() {
+    const splashStart = Date.now();
+    splashSetText("Starting…");
+
     const container = document.getElementById('tx-content');
     container.innerHTML = `<div id="loading-msg">Connecting to blockchain...</div>`;
     const statusEl = document.getElementById('loading-msg');
@@ -306,6 +403,7 @@
     const cacheKey = PRICE_CACHE_KEY_PREFIX + ccy;
 
     try {
+      splashSetText("Getting current price and balance…");
       const [priceRes, balanceRes] = await Promise.all([
         fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${ccy}`),
         fetch(`https://mempool.space/api/address/${wallet}`)
@@ -323,6 +421,7 @@
       document.getElementById('curr-btc').innerText = `${btcAmount.toFixed(6)} BTC`;
       document.getElementById('curr-gbp').innerText = fmtMoney(currentTotalValue, ccy);
 
+      splashSetText("Loading transactions…");
       const txs = await fetchAllChainTxs(wallet, statusEl);
       txs.sort((a,b) => (b?.status?.block_time || 0) - (a?.status?.block_time || 0));
 
@@ -339,6 +438,7 @@
       document.getElementById('avg-buy').innerText = fmtMoney(0, ccy);
       setProfitUI(currentTotalValue, 0, ccy);
 
+      splashSetText("Syncing price history…");
       for (let i = 0; i < txs.length; i++) {
         const tx = txs[i];
         const ts = tx?.status?.block_time;
@@ -421,8 +521,16 @@
 
       setProfitUI(currentTotalValue, totalInvested, ccy);
 
+      // Hide splash after minimum time
+      splashSetText("Almost done…");
+      await hideSplashWhenReady(splashStart);
+
     } catch (e) {
       console.error(e);
+      // still hide splash (after minimum)
+      splashSetText("Having trouble connecting…");
+      await hideSplashWhenReady(splashStart);
+
       container.innerHTML = "CoinGecko / Mempool is busy. Wait 60 seconds and refresh.";
     }
   }
@@ -451,7 +559,6 @@
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     }
 
-    // init state
     setActive(CURRENT_CCY);
 
     btn.addEventListener("click", (e) => {
@@ -466,6 +573,10 @@
         if (ccy && ccy !== CURRENT_CCY) {
           setActive(ccy);
           close();
+
+          // show splash again during reload
+          const splash = document.getElementById("splash");
+          if (splash) splash.classList.remove("hidden");
           fetchData();
         } else {
           close();
