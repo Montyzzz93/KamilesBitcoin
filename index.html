@@ -267,11 +267,11 @@
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
   const DEFAULT_CCY = "gbp";
+  const BASIS_CCY = "gbp";
   const CCY_STORAGE_KEY = "kamile_ccy";
   const PRICE_CACHE_KEY_PREFIX = "kamile_btc_prices_";
 
-  // Splash timing: show at least this long, but hide ASAP after data is ready
-  const SPLASH_MIN_MS = 8000; // 3.5s (adjust to 3000–5000 if you want)
+  const SPLASH_MIN_MS = 8000;
 
   function safeLSGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
   function safeLSSet(key, value) { try { localStorage.setItem(key, value); } catch {} }
@@ -282,7 +282,10 @@
   function fmtMoney(v, ccy) {
     const mapLocale = { gbp: "en-GB", usd: "en-US", eur: "en-IE" };
     const locale = mapLocale[ccy] || "en-GB";
-    return v.toLocaleString(locale, { style: "currency", currency: ccy.toUpperCase() });
+    return Number(v || 0).toLocaleString(locale, {
+      style: "currency",
+      currency: ccy.toUpperCase()
+    });
   }
 
   async function mustJson(res) {
@@ -290,12 +293,12 @@
     return res.json();
   }
 
-  function splashSetText(txt){
+  function splashSetText(txt) {
     const el = document.getElementById("splashSub");
     if (el) el.textContent = txt;
   }
 
-  async function hideSplashWhenReady(startTs){
+  async function hideSplashWhenReady(startTs) {
     const elapsed = Date.now() - startTs;
     const remain = Math.max(0, SPLASH_MIN_MS - elapsed);
     if (remain) await sleep(remain);
@@ -303,14 +306,17 @@
     const splash = document.getElementById("splash");
     if (splash) {
       splash.classList.add("hidden");
-      // remove from DOM after fade
       setTimeout(() => splash.remove(), 350);
     }
   }
 
   async function copyAddress() {
     let copied = false;
-    try { await navigator.clipboard.writeText(wallet); copied = true; } catch {}
+    try {
+      await navigator.clipboard.writeText(wallet);
+      copied = true;
+    } catch {}
+
     if (!copied) {
       try {
         const ta = document.createElement("textarea");
@@ -325,15 +331,16 @@
         ta.remove();
       } catch {}
     }
+
     if (!copied) alert("Copy failed on this browser. Please copy manually:\n\n" + wallet);
 
-    const hint = document.getElementById('copy-hint');
+    const hint = document.getElementById("copy-hint");
     hint.innerText = "DONE!";
     setTimeout(() => hint.innerText = "COPY", 1500);
   }
 
   function clearPriceCache() {
-    ["gbp","usd","eur"].forEach(ccy => safeLSRemove(PRICE_CACHE_KEY_PREFIX + ccy));
+    [BASIS_CCY].forEach(ccy => safeLSRemove(PRICE_CACHE_KEY_PREFIX + ccy));
     alert("Price cache cleared. It will refresh on next load.");
     location.reload();
   }
@@ -347,7 +354,11 @@
         ? `https://mempool.space/api/address/${addr}/txs/chain/${lastTxid}`
         : `https://mempool.space/api/address/${addr}/txs/chain`;
 
-      if (statusEl) statusEl.innerText = lastTxid ? `Loading more transactions... (${all.length})` : "Loading transactions...";
+      if (statusEl) {
+        statusEl.innerText = lastTxid
+          ? `Loading more transactions... (${all.length})`
+          : "Loading transactions...";
+      }
 
       const page = await mustJson(await fetch(url));
       if (!Array.isArray(page) || page.length === 0) break;
@@ -358,112 +369,166 @@
       if (all.length > 5000) break;
       await sleep(150);
     }
+
     return all;
   }
 
-  function setProfitUI(currentTotalValue, totalInvested, ccy) {
-    const profitEl = document.getElementById('total-profit');
-    const profit = currentTotalValue - totalInvested;
+  function setProfitUI(currentTotalValueDisplay, totalInvestedDisplay, profitPct, ccy) {
+    const profitEl = document.getElementById("total-profit");
+    const profitDisplay = currentTotalValueDisplay - totalInvestedDisplay;
 
-    let profitPct = "0.0";
-    if (totalInvested > 0) profitPct = ((profit / totalInvested) * 100).toFixed(1);
+    profitEl.innerText =
+      `${profitDisplay > 0 ? "+" : ""}${fmtMoney(profitDisplay, ccy)} (${profitPct.toFixed(1)}%)`;
 
-    profitEl.innerText = `${profit > 0 ? '+' : ''}${fmtMoney(profit, ccy)} (${profitPct}%)`;
-    profitEl.style.color = profit > 0 ? 'var(--profit-green)' : 'var(--loss-red)';
+    profitEl.style.color =
+      profitDisplay > 0 ? "var(--profit-green)" : "var(--loss-red)";
   }
 
-  async function fetchHistoricalFiat(dateStr, curPrice, ccy, statusEl2, i, total) {
+  async function fetchHistoricalBtcPrice(dateStr, currentBasePrice, statusEl2, i, total) {
     if (statusEl2) {
       const pct = Math.round((i / Math.max(1, total)) * 100);
       statusEl2.innerText = `Fetching price history... ${pct}% (${i}/${total})`;
     }
 
-    const histRes = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr}&localization=false`);
+    const histRes = await fetch(
+      `https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${dateStr}&localization=false`
+    );
+
     if (!histRes.ok) {
-      if (histRes.status === 429 && statusEl2) statusEl2.innerText = "CoinGecko rate limit (429). Using current price for some days...";
-      return curPrice;
+      if (histRes.status === 429 && statusEl2) {
+        statusEl2.innerText = "CoinGecko rate limit (429). Using current GBP price for some days...";
+      }
+      return currentBasePrice;
     }
 
     let histData = null;
-    try { histData = await histRes.json(); } catch { return curPrice; }
+    try {
+      histData = await histRes.json();
+    } catch {
+      return currentBasePrice;
+    }
 
-    const v = histData?.market_data?.current_price?.[ccy];
-    return (typeof v === "number" && isFinite(v)) ? v : curPrice;
+    const v = histData?.market_data?.current_price?.[BASIS_CCY];
+    return (typeof v === "number" && isFinite(v)) ? v : currentBasePrice;
+  }
+
+  async function fetchCurrentPrices() {
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=gbp,usd,eur"
+    );
+    const data = await mustJson(res);
+
+    const prices = data?.bitcoin || {};
+    if (!prices.gbp || !prices.usd || !prices.eur) {
+      throw new Error("Missing current BTC prices");
+    }
+
+    return prices;
+  }
+
+  function convertViaBtcCross(amountInGbp, btcPriceGbp, btcPriceDisplay) {
+    if (!btcPriceGbp || !btcPriceDisplay) return 0;
+    return amountInGbp * (btcPriceDisplay / btcPriceGbp);
   }
 
   async function fetchData() {
     const splashStart = Date.now();
     splashSetText("Starting…");
 
-    const container = document.getElementById('tx-content');
+    const container = document.getElementById("tx-content");
     container.innerHTML = `<div id="loading-msg">Connecting to blockchain...</div>`;
-    const statusEl = document.getElementById('loading-msg');
+    const statusEl = document.getElementById("loading-msg");
 
-    const ccy = CURRENT_CCY;
-    const cacheKey = PRICE_CACHE_KEY_PREFIX + ccy;
+    const displayCcy = CURRENT_CCY;
+    const cacheKey = PRICE_CACHE_KEY_PREFIX + BASIS_CCY;
 
     try {
       splashSetText("Getting current price and balance…");
-      const [priceRes, balanceRes] = await Promise.all([
-        fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${ccy}`),
-        fetch(`https://mempool.space/api/address/${wallet}`)
+
+      const [currentPrices, balance] = await Promise.all([
+        fetchCurrentPrices(),
+        mustJson(await fetch(`https://mempool.space/api/address/${wallet}`))
       ]);
 
-      const prices = await mustJson(priceRes);
-      const balance = await mustJson(balanceRes);
+      const currentBtcPriceGbp = currentPrices.gbp;
+      const currentBtcPriceDisplay = currentPrices[displayCcy];
 
-      const curPrice = prices?.bitcoin?.[ccy];
-      if (!curPrice) throw new Error("CoinGecko price missing");
+      const btcAmount =
+        (balance.chain_stats.funded_txo_sum - balance.chain_stats.spent_txo_sum) / 100000000;
 
-      const btcAmount = (balance.chain_stats.funded_txo_sum - balance.chain_stats.spent_txo_sum) / 100000000;
-      const currentTotalValue = btcAmount * curPrice;
+      const currentTotalValueGbp = btcAmount * currentBtcPriceGbp;
+      const currentTotalValueDisplay = convertViaBtcCross(
+        currentTotalValueGbp,
+        currentBtcPriceGbp,
+        currentBtcPriceDisplay
+      );
 
-      document.getElementById('curr-btc').innerText = `${btcAmount.toFixed(6)} BTC`;
-      document.getElementById('curr-gbp').innerText = fmtMoney(currentTotalValue, ccy);
+      document.getElementById("curr-btc").innerText = `${btcAmount.toFixed(6)} BTC`;
+      document.getElementById("curr-gbp").innerText = fmtMoney(currentTotalValueDisplay, displayCcy);
 
       splashSetText("Loading transactions…");
       const txs = await fetchAllChainTxs(wallet, statusEl);
-      txs.sort((a,b) => (b?.status?.block_time || 0) - (a?.status?.block_time || 0));
+      txs.sort((a, b) => (b?.status?.block_time || 0) - (a?.status?.block_time || 0));
 
       let priceCache = {};
-      try { priceCache = JSON.parse(safeLSGet(cacheKey) || "{}") || {}; } catch { priceCache = {}; }
+      try {
+        priceCache = JSON.parse(safeLSGet(cacheKey) || "{}") || {};
+      } catch {
+        priceCache = {};
+      }
 
-      let totalInvested = 0;
+      let totalInvestedGbp = 0;
       let totalBTCReceived = 0;
 
       container.innerHTML = `<div id="loading-msg"></div>`;
-      const statusEl2 = document.getElementById('loading-msg');
+      const statusEl2 = document.getElementById("loading-msg");
 
-      document.getElementById('total-invested').innerText = fmtMoney(0, ccy);
-      document.getElementById('avg-buy').innerText = fmtMoney(0, ccy);
-      setProfitUI(currentTotalValue, 0, ccy);
+      document.getElementById("total-invested").innerText = fmtMoney(0, displayCcy);
+      document.getElementById("avg-buy").innerText = fmtMoney(0, displayCcy);
+      setProfitUI(currentTotalValueDisplay, 0, 0, displayCcy);
 
-      splashSetText("Syncing price history…");
+      splashSetText("Syncing GBP price history…");
+
       for (let i = 0; i < txs.length; i++) {
         const tx = txs[i];
         const ts = tx?.status?.block_time;
         const dateObj = ts ? new Date(ts * 1000) : null;
 
-        let historicalPrice = curPrice;
+        let historicalBtcPriceGbp = currentBtcPriceGbp;
+
         if (dateObj) {
-          const day = String(dateObj.getDate()).padStart(2, '0');
-          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+          const day = String(dateObj.getDate()).padStart(2, "0");
+          const month = String(dateObj.getMonth() + 1).padStart(2, "0");
           const year = dateObj.getFullYear();
           const dateStr = `${day}-${month}-${year}`;
 
           if (priceCache[dateStr]) {
-            historicalPrice = priceCache[dateStr];
+            historicalBtcPriceGbp = priceCache[dateStr];
           } else {
-            historicalPrice = await fetchHistoricalFiat(dateStr, curPrice, ccy, statusEl2, i + 1, txs.length);
-            priceCache[dateStr] = historicalPrice;
+            historicalBtcPriceGbp = await fetchHistoricalBtcPrice(
+              dateStr,
+              currentBtcPriceGbp,
+              statusEl2,
+              i + 1,
+              txs.length
+            );
+            priceCache[dateStr] = historicalBtcPriceGbp;
             safeLSSet(cacheKey, JSON.stringify(priceCache));
+
             if (i < txs.length - 1) await sleep(2100);
           }
         }
 
-        let rcv = 0, snt = 0;
-        tx.vout?.forEach(o => { if (o.scriptpubkey_address === wallet) rcv += o.value; });
-        tx.vin?.forEach(v => { if (v.prevout?.scriptpubkey_address === wallet) snt += v.prevout.value; });
+        let rcv = 0;
+        let snt = 0;
+
+        tx.vout?.forEach(o => {
+          if (o.scriptpubkey_address === wallet) rcv += o.value;
+        });
+
+        tx.vin?.forEach(v => {
+          if (v.prevout?.scriptpubkey_address === wallet) snt += v.prevout.value;
+        });
 
         const net = (rcv - snt) / 100000000;
         if (net === 0) continue;
@@ -471,38 +536,63 @@
         const isRcv = net > 0;
         const btcVal = Math.abs(net);
 
-        const thenVal = btcVal * historicalPrice;
-        const nowVal  = btcVal * curPrice;
+        const thenValGbp = btcVal * historicalBtcPriceGbp;
+        const nowValGbp = btcVal * currentBtcPriceGbp;
 
-        const pctMove = historicalPrice > 0 ? ((curPrice - historicalPrice) / historicalPrice) * 100 : 0;
+        const thenValDisplay = convertViaBtcCross(
+          thenValGbp,
+          currentBtcPriceGbp,
+          currentBtcPriceDisplay
+        );
+
+        const nowValDisplay = convertViaBtcCross(
+          nowValGbp,
+          currentBtcPriceGbp,
+          currentBtcPriceDisplay
+        );
+
+        const pctMove =
+          historicalBtcPriceGbp > 0
+            ? ((currentBtcPriceGbp - historicalBtcPriceGbp) / historicalBtcPriceGbp) * 100
+            : 0;
+
         const pctClass = pctMove >= 0 ? "pct-pos" : "pct-neg";
-        const pctText = `${pctMove >= 0 ? '+' : ''}${pctMove.toFixed(1)}%`;
+        const pctText = `${pctMove >= 0 ? "+" : ""}${pctMove.toFixed(1)}%`;
 
         if (isRcv) {
-          totalInvested += thenVal;
+          totalInvestedGbp += thenValGbp;
           totalBTCReceived += btcVal;
         }
 
         const dateLabel = dateObj
-          ? dateObj.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })
+          ? dateObj.toLocaleDateString([], {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit"
+            })
           : "Unconfirmed";
 
         const rateLabel = dateObj
-          ? `BTC at the time: ${fmtMoney(Math.round(historicalPrice), ccy)}`
-          : `BTC at the time: ${fmtMoney(Math.round(curPrice), ccy)} (current)`;
+          ? `BTC at the time: ${fmtMoney(
+              convertViaBtcCross(historicalBtcPriceGbp, currentBtcPriceGbp, currentBtcPriceDisplay),
+              displayCcy
+            )}`
+          : `BTC at the time: ${fmtMoney(currentBtcPriceDisplay, displayCcy)} (current)`;
 
-        const item = document.createElement('div');
-        item.className = 'tx-item';
+        const item = document.createElement("div");
+        item.className = "tx-item";
         item.innerHTML = `
           <div>
             <span class="tx-date">${dateLabel}</span>
             <span class="tx-basis">${rateLabel}</span>
           </div>
           <div class="tx-values">
-            <span class="tx-btc ${isRcv ? 'received' : 'sent'}">${isRcv ? '+' : '-'}${btcVal.toFixed(6)}</span>
-            <span class="tx-gbp-then">Worth then ${fmtMoney(thenVal, ccy)}</span>
+            <span class="tx-btc ${isRcv ? "received" : "sent"}">${isRcv ? "+" : "-"}${btcVal.toFixed(6)}</span>
+            <span class="tx-gbp-then">Worth then ${fmtMoney(thenValDisplay, displayCcy)}</span>
             <span class="tx-gbp-now">
-              Worth now ${fmtMoney(nowVal, ccy)}
+              Worth now ${fmtMoney(nowValDisplay, displayCcy)}
               <span class="tx-pct ${pctClass}">${pctText}</span>
             </span>
           </div>
@@ -512,49 +602,62 @@
 
       if (statusEl2) statusEl2.innerText = "";
 
-      const avgBuy = totalBTCReceived > 0 ? (totalInvested / totalBTCReceived) : 0;
+      const avgBuyGbp = totalBTCReceived > 0 ? (totalInvestedGbp / totalBTCReceived) : 0;
+      const profitPct = totalInvestedGbp > 0
+        ? ((currentTotalValueGbp - totalInvestedGbp) / totalInvestedGbp) * 100
+        : 0;
 
-      document.getElementById('total-invested').innerText = fmtMoney(totalInvested, ccy);
-      document.getElementById('avg-buy').innerText = avgBuy.toLocaleString(undefined, {
-        style: 'currency', currency: ccy.toUpperCase(), maximumFractionDigits: 0
-      });
+      const totalInvestedDisplay = convertViaBtcCross(
+        totalInvestedGbp,
+        currentBtcPriceGbp,
+        currentBtcPriceDisplay
+      );
 
-      setProfitUI(currentTotalValue, totalInvested, ccy);
+      const avgBuyDisplay = convertViaBtcCross(
+        avgBuyGbp,
+        currentBtcPriceGbp,
+        currentBtcPriceDisplay
+      );
 
-      // Hide splash after minimum time
+      document.getElementById("total-invested").innerText =
+        fmtMoney(totalInvestedDisplay, displayCcy);
+
+      document.getElementById("avg-buy").innerText =
+        fmtMoney(avgBuyDisplay, displayCcy);
+
+      setProfitUI(currentTotalValueDisplay, totalInvestedDisplay, profitPct, displayCcy);
+
       splashSetText("Almost done…");
       await hideSplashWhenReady(splashStart);
 
     } catch (e) {
       console.error(e);
-      // still hide splash (after minimum)
       splashSetText("Having trouble connecting…");
       await hideSplashWhenReady(splashStart);
-
       container.innerHTML = "CoinGecko / Mempool is busy. Wait 60 seconds and refresh.";
     }
   }
 
-  // ---- Custom dropdown behaviour ----
-  (function initCurrencyDropdown(){
+  (function initCurrencyDropdown() {
     const wrap = document.getElementById("ccyWrap");
-    const btn  = document.getElementById("ccyBtn");
+    const btn = document.getElementById("ccyBtn");
     const menu = document.getElementById("ccyMenu");
     const label = document.getElementById("ccyLabel");
     const items = Array.from(menu.querySelectorAll(".ccy-item"));
 
-    function setActive(ccy){
+    function setActive(ccy) {
       CURRENT_CCY = ccy;
       safeLSSet(CCY_STORAGE_KEY, ccy);
       label.textContent = ccy.toUpperCase();
       items.forEach(it => it.classList.toggle("active", it.dataset.ccy === ccy));
     }
 
-    function close(){
+    function close() {
       wrap.classList.remove("open");
       btn.setAttribute("aria-expanded", "false");
     }
-    function toggle(){
+
+    function toggle() {
       const open = wrap.classList.toggle("open");
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     }
@@ -570,13 +673,14 @@
       it.addEventListener("click", (e) => {
         e.stopPropagation();
         const ccy = it.dataset.ccy;
+
         if (ccy && ccy !== CURRENT_CCY) {
           setActive(ccy);
           close();
 
-          // show splash again during reload
           const splash = document.getElementById("splash");
           if (splash) splash.classList.remove("hidden");
+
           fetchData();
         } else {
           close();
@@ -592,7 +696,6 @@
 
   fetchData();
 </script>
-
 </body>
 </html>
 
